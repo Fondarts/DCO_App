@@ -1,0 +1,16 @@
+{
+  "name": "dco-app",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm -w @dco/web run dev",
+    "dev:worker": "npm -w @dco/worker run dev",
+    "build": "npm -w @dco/web run build",
+    "db:migrate": "npm -w @dco/web run db:migrate",
+    "db:generate": "npm -w @dco/web run db:generate",
+    "db:studio": "npm -w @dco/web run db:studio"
+  }
+}

@@ -1,0 +1,111 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id        String     @id @default(uuid())
+  name      String
+  slug      String     @unique
+  users     User[]
+  campaigns Campaign[]
+  templates Template[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model User {
+  id             String       @id @default(uuid())
+  email          String       @unique
+  passwordHash   String
+  name           String
+  role           String       @default("CLIENT") // ADMIN, DESIGNER, CLIENT
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  renderJobs     RenderJob[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model Template {
+  id             String             @id @default(uuid())
+  name           String
+  description    String?
+  version        Int                @default(1)
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  aepFilePath    String
+  thumbnailPath  String?
+  manifest       String             // JSON stored as string (SQLite)
+  status         String             @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  campaigns      CampaignTemplate[]
+  variants       Variant[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+model Campaign {
+  id             String             @id @default(uuid())
+  name           String
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id])
+  templates      CampaignTemplate[]
+  variants       Variant[]
+  status         String             @default("ACTIVE") // ACTIVE, COMPLETED, ARCHIVED
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+}
+
+model CampaignTemplate {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  templateId String
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, templateId])
+}
+
+model Variant {
+  id              String      @id @default(uuid())
+  name            String
+  templateId      String
+  template        Template    @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  campaignId      String
+  campaign        Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  fieldValues     String      @default("{}") // JSON stored as string (SQLite)
+  outputVariantId String?
+  renderJobs      RenderJob[]
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+}
+
+model Asset {
+  id           String   @id @default(uuid())
+  originalName String
+  storagePath  String
+  mimeType     String
+  size         Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+}
+
+model RenderJob {
+  id            String    @id @default(uuid())
+  variantId     String
+  variant       Variant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  submittedById String
+  submittedBy   User      @relation(fields: [submittedById], references: [id])
+  status        String    @default("PENDING") // PENDING, QUEUED, RENDERING, ENCODING, COMPLETED, FAILED
+  progress      Int       @default(0)
+  outputPath    String?
+  errorMessage  String?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}

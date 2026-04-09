@@ -1,0 +1,23 @@
+node_modules/
+.next/
+dist/
+.env
+.env.local
+.env.production
+*.log
+.DS_Store
+Thumbs.db
+
+# Storage & renders
+apps/web/storage/
+renders/
+*.mp4
+*.avi
+*.aep
+
+# Prisma SQLite
+apps/web/prisma/dev.db
+apps/web/prisma/dev.db-journal
+
+# Claude
+.claude/
