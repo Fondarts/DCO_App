@@ -39,8 +39,8 @@ async function withRenderLock<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-// --- Build nexrender assets from manifest + field values ---
-function buildNexrenderAssets(
+// --- Build nexrender assets for AEP templates ---
+function buildAepAssets(
   manifest: TemplateManifest,
   fieldValues: Record<string, unknown>
 ) {
@@ -49,17 +49,30 @@ function buildNexrenderAssets(
   for (const field of manifest.fields) {
     const value = fieldValues[field.id] ?? field.default;
     if (value === null || value === undefined) continue;
+    if (!field.nexrenderAsset) continue;
+
+    const comp = field.composition || manifest.composition;
 
     switch (field.nexrenderAsset.type) {
-      case "data":
+      case "data": {
+        if (!field.nexrenderAsset.property) continue;
+
+        let dataValue: unknown = value;
+        if (field.type === "text") {
+          if (typeof value === "object" && value !== null && "text" in (value as Record<string, unknown>)) {
+            dataValue = (value as Record<string, unknown>).text;
+          }
+        }
+
         assets.push({
           type: "data",
           layerName: field.layerName,
           property: field.nexrenderAsset.property,
-          value,
-          composition: manifest.composition,
+          value: dataValue,
+          composition: comp,
         });
         break;
+      }
 
       case "image":
       case "footage":
@@ -70,7 +83,7 @@ function buildNexrenderAssets(
             type: field.nexrenderAsset.type === "footage" ? "video" : field.nexrenderAsset.type,
             src: `file:///${absPath.replace(/\\/g, "/").replace(/ /g, "%20")}`,
             layerName: field.layerName,
-            composition: manifest.composition,
+            composition: comp,
           });
         }
         break;
@@ -81,7 +94,67 @@ function buildNexrenderAssets(
   return assets;
 }
 
-// --- Run nexrender via child process, return path to rendered file ---
+// Local MOGRT action module path (replaces nexrender-action-mogrt-template)
+const MOGRT_ACTION_PATH = path.resolve("src/lib/nexrender-mogrt-action.cjs");
+
+// --- Build MOGRT job config (uses local nexrender action for extraction) ---
+function buildMogrtJobConfig(
+  mogrtPath: string,
+  manifest: TemplateManifest,
+  fieldValues: Record<string, unknown>
+) {
+  const essentialParameters: Record<string, unknown> = {};
+  const mediaAssets: Record<string, unknown>[] = [];
+
+  for (const field of manifest.fields) {
+    const value = fieldValues[field.id] ?? field.default;
+    if (value === null || value === undefined) continue;
+
+    if (field.type === "image" || field.type === "video" || field.type === "audio") {
+      if (typeof value === "string" && value.length > 0 && field.layerName) {
+        const absPath = path.resolve(value);
+        mediaAssets.push({
+          type: field.type === "video" ? "video" : field.type,
+          src: `file:///${absPath.replace(/\\/g, "/").replace(/ /g, "%20")}`,
+          layerName: field.layerName,
+        });
+      }
+    } else {
+      const paramName = field.parameterName || field.id;
+      let paramValue: unknown = value;
+      if (field.type === "text" && typeof value === "object" && value !== null && "text" in (value as Record<string, unknown>)) {
+        paramValue = (value as Record<string, unknown>).text;
+      }
+
+      if (paramName.includes("|") && Array.isArray(paramValue)) {
+        const [xParam, yParam] = paramName.split("|");
+        essentialParameters[xParam] = paramValue[0];
+        essentialParameters[yParam] = paramValue[1];
+      } else {
+        essentialParameters[paramName] = paramValue;
+      }
+    }
+  }
+
+  const absMogrt = path.resolve(mogrtPath);
+
+  return {
+    template: {
+      src: `file:///${absMogrt.replace(/\\/g, "/").replace(/ /g, "%20")}`,
+      composition: "mogrt", // will be replaced by action
+      outputExt: "avi",
+    },
+    assets: mediaAssets,
+    predownload: [
+      {
+        module: MOGRT_ACTION_PATH,
+        essentialParameters,
+      },
+    ],
+  };
+}
+
+// --- Run nexrender via child process ---
 async function runNexrender(
   jobData: Record<string, unknown>,
   timeoutMs: number = 300_000
@@ -96,18 +169,41 @@ async function runNexrender(
 
   try {
     console.log("[nexrender] Spawning worker...");
-    const { stdout, stderr } = await execFileAsync(
-      process.execPath,
-      [workerScript, jobPath, resultPath],
-      {
-        timeout: timeoutMs,
-        cwd: path.resolve("."),
-        windowsHide: true,
-      }
-    );
+    console.log("[nexrender] Job:", JSON.stringify(jobData).slice(0, 500));
 
-    if (stdout) console.log("[nexrender stdout]", stdout.slice(0, 2000));
-    if (stderr) console.log("[nexrender stderr]", stderr.slice(0, 2000));
+    let stdout = "", stderr = "";
+    try {
+      const r = await execFileAsync(
+        process.execPath,
+        [workerScript, jobPath, resultPath],
+        {
+          timeout: timeoutMs,
+          cwd: path.resolve("."),
+          windowsHide: true,
+          maxBuffer: 10 * 1024 * 1024,
+        }
+      );
+      stdout = r.stdout || "";
+      stderr = r.stderr || "";
+    } catch (execErr: unknown) {
+      const e = execErr as { stdout?: string; stderr?: string; message?: string; code?: string };
+      stdout = e.stdout || "";
+      stderr = e.stderr || "";
+      // Write full output to a debug file
+      const debugPath = path.resolve(`storage/tmp/render-debug-${tmpId}.txt`);
+      await writeFile(debugPath, `STDOUT:\n${stdout}\n\nSTDERR:\n${stderr}\n\nERROR: ${e.message}\nCODE: ${e.code}`);
+      console.error("[nexrender] Worker failed. Debug:", debugPath);
+      console.error("[nexrender] STDOUT (last 3000):", stdout.slice(-3000));
+      console.error("[nexrender] STDERR (last 2000):", stderr.slice(-2000));
+
+      // Check if result file was written despite error
+      if (!existsSync(resultPath)) {
+        throw new Error(`Command failed: ${e.message}\nSTDOUT: ${stdout.slice(-500)}\nSTDERR: ${stderr.slice(-500)}`);
+      }
+    }
+
+    if (stdout) console.log("[nexrender stdout]", stdout.slice(-3000));
+    if (stderr) console.log("[nexrender stderr]", stderr.slice(-1000));
 
     if (!existsSync(resultPath)) {
       throw new Error("Nexrender worker did not produce a result file");
@@ -154,11 +250,47 @@ async function extractFrame(
 // --- Public API ---
 
 interface RenderOptions {
-  aepFilePath: string;
+  templateFilePath: string;
   manifest: TemplateManifest;
   fieldValues: Record<string, unknown>;
   outputVariantId?: string;
   orgId: string;
+}
+
+function resolveComposition(options: RenderOptions): string {
+  if (options.outputVariantId) {
+    const variant = options.manifest.outputVariants.find((v) => v.id === options.outputVariantId);
+    if (variant?.composition) return variant.composition;
+  }
+  return options.manifest.composition;
+}
+
+function buildJob(options: RenderOptions): { isMogrt: boolean } & Record<string, unknown> {
+  const isMogrt = options.manifest.format === "mogrt";
+
+  if (isMogrt) {
+    const config = buildMogrtJobConfig(options.templateFilePath, options.manifest, options.fieldValues);
+    return { ...config, isMogrt: true };
+  }
+
+  // AEP path
+  const absAepPath = path.resolve(options.templateFilePath);
+  if (!existsSync(absAepPath)) {
+    throw new Error(`AEP file not found: ${absAepPath}`);
+  }
+
+  const assets = buildAepAssets(options.manifest, options.fieldValues);
+  const composition = resolveComposition(options);
+
+  return {
+    isMogrt: false,
+    template: {
+      src: `file:///${absAepPath.replace(/\\/g, "/").replace(/ /g, "%20")}`,
+      composition,
+      outputExt: "avi",
+    },
+    assets,
+  };
 }
 
 /**
@@ -169,13 +301,18 @@ export async function renderVideo(
   jobId: string
 ): Promise<string> {
   return withRenderLock(async () => {
-    const absAepPath = path.resolve(options.aepFilePath);
-    if (!existsSync(absAepPath)) {
-      throw new Error(`AEP file not found: ${absAepPath}`);
+    const baseJob = buildJob(options);
+    const { isMogrt, ...jobData } = baseJob;
+
+    const actions: Record<string, unknown[]> = {};
+
+    // MOGRT: predownload action for extraction + essential params
+    if (isMogrt && jobData.predownload) {
+      actions.predownload = jobData.predownload as unknown[];
+      delete jobData.predownload;
     }
 
-    const assets = buildNexrenderAssets(options.manifest, options.fieldValues);
-
+    // Both formats output AVI → need encode
     const variant = options.outputVariantId
       ? options.manifest.outputVariants.find((v) => v.id === options.outputVariantId)
       : null;
@@ -188,40 +325,34 @@ export async function renderVideo(
       "-crf": "18",
     };
 
-    if (variant) {
+    if (variant && !variant.composition) {
       encodeParams["-vf"] =
         `scale=${variant.width}:${variant.height}:force_original_aspect_ratio=decrease,pad=${variant.width}:${variant.height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     }
 
+    actions.postrender = [
+      {
+        module: "@nexrender/action-encode",
+        preset: "mp4",
+        output: "output.mp4",
+        params: encodeParams,
+      },
+    ];
+
     const job = {
-      template: {
-        src: `file:///${absAepPath.replace(/\\/g, "/").replace(/ /g, "%20")}`,
-        composition: options.manifest.composition,
-        outputExt: "avi",
-      },
-      assets,
-      actions: {
-        postrender: [
-          {
-            module: "@nexrender/action-encode",
-            preset: "mp4",
-            output: "output.mp4",
-            params: encodeParams,
-          },
-        ],
-      },
+      ...jobData,
+      actions,
       workpath: path.resolve("storage/tmp/nexrender"),
     };
 
-    console.log(`[render] Starting video render for job ${jobId}...`);
-    const tempOutput = await runNexrender(job, 600_000);
+    console.log(`[render] Starting video render for job ${jobId} (${isMogrt ? "MOGRT" : "AEP"})...`);
 
-    // Copy to permanent renders/ folder
+    const tempOutput = await runNexrender(job as Record<string, unknown>, 600_000);
+
     const finalPath = getRenderOutputPath(options.orgId, `export-${jobId}`);
     mkdirSync(path.dirname(finalPath), { recursive: true });
     await copyFile(tempOutput, finalPath);
 
-    // Cleanup nexrender temp
     await rm(path.dirname(tempOutput), { recursive: true, force: true }).catch(() => {});
 
     console.log(`[render] Video saved to: ${finalPath}`);
@@ -237,47 +368,45 @@ export async function renderPreview(
   variantId: string
 ): Promise<string> {
   return withRenderLock(async () => {
-    const absAepPath = path.resolve(options.aepFilePath);
-    if (!existsSync(absAepPath)) {
-      throw new Error(`AEP file not found: ${absAepPath}`);
+    const baseJob = buildJob(options);
+    const { isMogrt, ...jobData } = baseJob;
+
+    const actions: Record<string, unknown[]> = {};
+
+    // MOGRT: predownload action for extraction + essential params
+    if (isMogrt && jobData.predownload) {
+      actions.predownload = jobData.predownload as unknown[];
+      delete jobData.predownload;
     }
 
-    const assets = buildNexrenderAssets(options.manifest, options.fieldValues);
+    // Both formats output AVI → need encode for preview
+    actions.postrender = [
+      {
+        module: "@nexrender/action-encode",
+        preset: "mp4",
+        output: "output.mp4",
+        params: {
+          "-vcodec": "libx264",
+          "-pix_fmt": "yuv420p",
+          "-preset": "ultrafast",
+          "-crf": "28",
+        },
+      },
+    ];
 
     const job = {
-      template: {
-        src: `file:///${absAepPath.replace(/\\/g, "/").replace(/ /g, "%20")}`,
-        composition: options.manifest.composition,
-        outputExt: "avi",
-      },
-      assets,
-      actions: {
-        postrender: [
-          {
-            module: "@nexrender/action-encode",
-            preset: "mp4",
-            output: "output.mp4",
-            params: {
-              "-vcodec": "libx264",
-              "-pix_fmt": "yuv420p",
-              "-preset": "ultrafast",
-              "-crf": "28",
-            },
-          },
-        ],
-      },
+      ...jobData,
+      actions,
       workpath: path.resolve("storage/tmp/nexrender"),
     };
 
-    console.log(`[preview] Rendering for preview...`);
-    const tempVideo = await runNexrender(job, 120_000);
+    console.log(`[preview] Rendering for preview (${isMogrt ? "MOGRT" : "AEP"})...`);
 
-    // Extract middle frame as PNG
-    const duration = options.manifest.duration || 10;
+    const tempVideo = await runNexrender(job as Record<string, unknown>, 600_000);
+
     const previewPath = getPreviewOutputPath(options.orgId, variantId);
-    await extractFrame(tempVideo, previewPath, duration / 2);
+    await extractFrame(tempVideo, previewPath, 0.5);
 
-    // Cleanup nexrender temp
     await rm(path.dirname(tempVideo), { recursive: true, force: true }).catch(() => {});
 
     console.log(`[preview] Saved to: ${previewPath}`);

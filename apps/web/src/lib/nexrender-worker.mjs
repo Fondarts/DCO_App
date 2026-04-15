@@ -18,8 +18,9 @@ const jobData = JSON.parse(readFileSync(jobPath, "utf-8"));
 // Find aerender
 const aerenderPaths = [
   "C:\\Program Files\\Adobe\\Adobe After Effects 2025\\Support Files\\aerender.exe",
-  "C:\\Program Files\\Adobe\\Adobe After Effects 2026\\Support Files\\aerender.exe",
   "C:\\Program Files\\Adobe\\Adobe After Effects 2024\\Support Files\\aerender.exe",
+  "C:\\Program Files\\Adobe\\Adobe After Effects 2026\\Support Files\\aerender.exe",
+  "C:\\Program Files\\Adobe\\Adobe After Effects (Beta)\\Support Files\\aerender.exe",
 ];
 
 let binary = null;
@@ -33,7 +34,9 @@ if (!binary) {
 }
 
 try {
+  const isMogrt = jobData.template.src.endsWith(".mogrt");
   console.log("[nexrender] Starting render...");
+  console.log("[nexrender] Format:", isMogrt ? "MOGRT" : "AEP");
   console.log("[nexrender] Binary:", binary);
   console.log("[nexrender] Template:", jobData.template.src);
   console.log("[nexrender] Composition:", jobData.template.composition);
@@ -47,7 +50,37 @@ try {
   });
 
   console.log("[nexrender] Render complete. Output:", result.output);
-  writeFileSync(resultPath, JSON.stringify({ output: result.output }));
+  console.log("[nexrender] Template dest:", result.template?.dest);
+
+  // For MOGRT, nexrender may not set result.output correctly.
+  // The rendered file is result.mp4 in the workpath.
+  let outputFile = result.output;
+  if (!outputFile || !existsSync(outputFile)) {
+    // Try to find the output in the workdir
+    const workdir = result.workpath || jobData.workpath;
+    const uid = result.uid;
+    if (workdir && uid) {
+      const candidates = ["output.mp4", "result.mp4", "result.avi"];
+      const { readdirSync } = await import("fs");
+      const dir = workdir + "/" + uid;
+      try {
+        const files = readdirSync(dir);
+        console.log("[nexrender] Workdir files:", files.join(", "));
+        for (const c of candidates) {
+          const p = dir + "/" + c;
+          if (existsSync(p)) {
+            outputFile = p;
+            console.log("[nexrender] Found output at:", p);
+            break;
+          }
+        }
+      } catch(e) {
+        console.log("[nexrender] Could not read workdir:", e.message);
+      }
+    }
+  }
+
+  writeFileSync(resultPath, JSON.stringify({ output: outputFile }));
 } catch (err) {
   console.error("[nexrender] Error:", err.message);
   writeFileSync(resultPath, JSON.stringify({ error: err.message }));

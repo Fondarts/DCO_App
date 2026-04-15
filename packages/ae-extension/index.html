@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>DCO</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <h1>DCO</h1>
+  <div class="subtitle">Dynamic Creative Optimization</div>
+
+  <!-- Mode Toggle -->
+  <div class="section">
+    <div class="section-title">Template Type</div>
+    <div style="display:flex;gap:4px;">
+      <button class="btn btn-primary btn-small" id="mode-mogrt">MOGRT</button>
+      <button class="btn btn-small" id="mode-aep">AEP (Legacy)</button>
+    </div>
+  </div>
+
+  <!-- Composition Info -->
+  <div class="section">
+    <div class="header-row">
+      <div class="section-title">Composition</div>
+      <button class="btn-icon" id="btn-refresh" title="Refresh">&#8635;</button>
+    </div>
+    <div id="comp-info">Loading...</div>
+  </div>
+
+  <!-- Template Name -->
+  <div class="section">
+    <div class="section-title">Template Name</div>
+    <input type="text" id="template-name" placeholder="Template name">
+  </div>
+
+  <!-- MOGRT Controls -->
+  <div id="mogrt-controls">
+    <div class="section">
+      <div class="section-title">MOGRT File</div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button class="btn btn-secondary btn-small" id="btn-browse-mogrt">Select .mogrt</button>
+        <span id="mogrt-path-display" style="font-size:11px;color:#aaa;">No file selected</span>
+      </div>
+      <div style="font-size:10px;color:#666;margin-top:4px;">
+        Export from AE: File &gt; Export &gt; Motion Graphics Template
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Essential Graphics Parameters</div>
+      <button class="btn btn-primary btn-small" id="btn-scan-eg">Scan EG Parameters</button>
+    </div>
+  </div>
+
+  <!-- Tools -->
+  <div class="section">
+    <div class="section-title">Tools</div>
+    <div style="display:flex;gap:6px;align-items:center;">
+      <button class="btn btn-secondary btn-small" id="btn-layer-switcher">Layer Switcher</button>
+      <span style="font-size:10px;color:#888;">Select 2+ layers, creates dropdown toggle</span>
+    </div>
+  </div>
+
+  <!-- AEP Controls -->
+  <div id="aep-controls" style="display:none;">
+    <div class="section" style="margin-top:0;">
+      <div style="margin-top: 4px;">
+        <button class="btn btn-primary btn-small" id="btn-add-property">+ Add Property</button>
+        <button class="btn btn-secondary btn-small" id="btn-add-layer">+ Add Layer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Editable Fields -->
+  <div class="section">
+    <div class="section-title">Editable Fields</div>
+    <div id="fields-list">
+      <div class="empty">No fields added yet.</div>
+    </div>
+  </div>
+
+  <!-- Output Variants -->
+  <div class="section">
+    <div class="header-row">
+      <div class="section-title">Output Variants</div>
+      <button class="btn-icon" id="btn-detect-comps" title="Detect compositions from project">&#128269;</button>
+    </div>
+    <div style="font-size:10px;color:#666;margin-bottom:6px;">
+      Set a composition name per variant to render natively (leave empty to use main comp + scale)
+    </div>
+    <div class="checkbox-row" style="align-items:center;gap:6px;">
+      <input type="checkbox" id="ov-landscape" checked>
+      <label for="ov-landscape" style="min-width:150px;">16:9 (1920x1080)</label>
+      <input type="text" id="ov-landscape-comp" placeholder="comp name..." style="flex:1;font-size:11px;padding:2px 4px;">
+    </div>
+    <div class="checkbox-row" style="align-items:center;gap:6px;">
+      <input type="checkbox" id="ov-square">
+      <label for="ov-square" style="min-width:150px;">1:1 (1080x1080)</label>
+      <input type="text" id="ov-square-comp" placeholder="comp name..." style="flex:1;font-size:11px;padding:2px 4px;">
+    </div>
+    <div class="checkbox-row" style="align-items:center;gap:6px;">
+      <input type="checkbox" id="ov-vertical">
+      <label for="ov-vertical" style="min-width:150px;">9:16 (1080x1920)</label>
+      <input type="text" id="ov-vertical-comp" placeholder="comp name..." style="flex:1;font-size:11px;padding:2px 4px;">
+    </div>
+    <div id="detected-comps" style="font-size:10px;color:#888;margin-top:4px;"></div>
+  </div>
+
+  <!-- Thumbnail -->
+  <div class="section">
+    <div class="section-title">Thumbnail</div>
+    <div id="thumbnail-preview"></div>
+    <button class="btn btn-secondary" id="btn-thumbnail">Generate Thumbnail</button>
+  </div>
+
+  <!-- Server & Send -->
+  <div class="section">
+    <div class="section-title">Send to DCO</div>
+    <input type="url" id="server-url" value="http://localhost:3000" placeholder="DCO server URL">
+    <button class="btn btn-success" id="btn-send">Send to DCO</button>
+  </div>
+
+  <!-- Debug -->
+  <div class="section">
+    <button class="btn btn-secondary" id="btn-debug">Debug Selection</button>
+    <pre id="debug-output" style="font-size:9px;color:#888;white-space:pre-wrap;margin-top:4px;max-height:200px;overflow-y:auto;"></pre>
+  </div>
+
+  <!-- Status -->
+  <div id="status" class="status">Ready</div>
+
+  <script src="js/CSInterface.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
