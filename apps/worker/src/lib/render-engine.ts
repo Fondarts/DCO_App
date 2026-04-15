@@ -320,28 +320,101 @@ export class RenderEngine {
   }
 
   /**
-   * Render and extract a single frame as PNG preview.
+   * Render a single frame as PNG preview (much faster than full video).
+   * Uses aerender with -s/-e to render only 1 frame, outputting as PNG.
    */
   async renderPreview(
     request: RenderRequest,
     previewOutputPath: string,
     onProgress?: ProgressCallback
   ): Promise<string> {
-    // Render video first (with fast settings)
-    const tempVideo = await this.render(request, onProgress);
+    const { manifest, fieldValues, jobId } = request;
+    const isMogrt = manifest.format === "mogrt";
 
-    // Extract frame
+    // Resolve template path (same logic as render())
+    let templatePath = await this.resolveFile(request.templateFilePath);
+    if (isMogrt && request.outputVariantId) {
+      const variant = manifest.outputVariants.find((v) => v.id === request.outputVariantId);
+      const variantMogrt = (variant as Record<string, unknown> | undefined)?.mogrtPath as string | undefined;
+      if (variantMogrt) {
+        try { templatePath = await this.resolveFile(variantMogrt); } catch {}
+      }
+    }
+
+    onProgress?.({ phase: "RENDERING", progress: 10, message: "Building preview job..." });
+
+    // Build job — same as render() but output as single-frame PNG
+    let jobData: Record<string, unknown>;
+
+    if (isMogrt) {
+      const config = buildMogrtJobConfig(templatePath, manifest, fieldValues, this.mogrtActionPath);
+      jobData = {
+        template: { ...config.template, outputExt: "png", frameStart: 15, frameEnd: 15 },
+        assets: config.assets,
+        actions: { predownload: config.predownload, postrender: [] },
+        workpath: path.resolve(this.config.workdir),
+      };
+    } else {
+      const assets = buildAepAssets(manifest, fieldValues);
+      let composition = manifest.composition;
+      if (request.outputVariantId) {
+        const variant = manifest.outputVariants.find((v) => v.id === request.outputVariantId);
+        if (variant?.composition) composition = variant.composition;
+      }
+      const absAep = path.resolve(templatePath);
+      jobData = {
+        template: {
+          src: `file:///${absAep.replace(/\\/g, "/").replace(/ /g, "%20")}`,
+          composition,
+          outputExt: "png",
+          frameStart: 15,
+          frameEnd: 15,
+        },
+        assets,
+        actions: { postrender: [] },
+        workpath: path.resolve(this.config.workdir),
+      };
+    }
+
+    // No FFmpeg encode needed — output is already PNG
+    onProgress?.({ phase: "RENDERING", progress: 20, message: "Rendering single frame..." });
+
+    const tempOutput = await this.runNexrender(jobData, onProgress);
+
+    // The output might be a PNG or a folder with PNGs — find the actual file
     mkdirSync(path.dirname(previewOutputPath), { recursive: true });
-    await execFileAsync(this.ffmpegPath, [
-      "-i", tempVideo,
-      "-ss", "0.5",
-      "-frames:v", "1",
-      "-y",
-      previewOutputPath,
-    ], { timeout: 30_000 });
+    let sourcePng = tempOutput;
 
-    // Clean up temp video
-    await rm(tempVideo, { force: true }).catch(() => {});
+    if (existsSync(tempOutput) && !tempOutput.endsWith(".png")) {
+      // Output is probably an AVI/video with 1 frame — extract with ffmpeg
+      await execFileAsync(this.ffmpegPath, [
+        "-i", tempOutput, "-frames:v", "1", "-y", previewOutputPath,
+      ], { timeout: 30_000 });
+      await rm(path.dirname(tempOutput), { recursive: true, force: true }).catch(() => {});
+      return previewOutputPath;
+    }
+
+    // Try to find PNG in the workdir if output path doesn't exist
+    if (!existsSync(sourcePng)) {
+      const dir = path.dirname(tempOutput);
+      if (existsSync(dir)) {
+        const files = readdirSync(dir).filter(f => f.endsWith(".png"));
+        if (files.length > 0) sourcePng = path.join(dir, files[0]);
+      }
+    }
+
+    if (existsSync(sourcePng)) {
+      await copyFile(sourcePng, previewOutputPath);
+      await rm(path.dirname(tempOutput), { recursive: true, force: true }).catch(() => {});
+    } else {
+      // Fallback: full render + extract frame
+      console.warn("[render-engine] Single-frame failed, falling back to full render");
+      const tempVideo = await this.render(request, onProgress);
+      await execFileAsync(this.ffmpegPath, [
+        "-i", tempVideo, "-ss", "0.5", "-frames:v", "1", "-y", previewOutputPath,
+      ], { timeout: 30_000 });
+      await rm(tempVideo, { force: true }).catch(() => {});
+    }
 
     return previewOutputPath;
   }
