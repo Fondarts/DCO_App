@@ -1,8 +1,9 @@
 // Standalone nexrender worker script
-// Executed as a child process from the Next.js API
+// Executed as a child process from the render engine
 // Usage: node nexrender-worker.mjs <job-json-path> <output-path>
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, copyFileSync, mkdirSync } from "fs";
+import path from "path";
 import { init, render } from "@nexrender/core";
 
 const jobPath = process.argv[2];
@@ -36,72 +37,60 @@ if (!binary) {
 
 try {
   const isMogrt = jobData.template.src.endsWith(".mogrt");
+  const workpath = jobData.workpath || "./storage/tmp/nexrender";
+
   console.log("[nexrender] Starting render...");
   console.log("[nexrender] Format:", isMogrt ? "MOGRT" : "AEP");
   console.log("[nexrender] Binary:", binary);
   console.log("[nexrender] Template:", jobData.template.src);
   console.log("[nexrender] Composition:", jobData.template.composition);
+  console.log("[nexrender] OutputExt:", jobData.template.outputExt || "avi");
+  console.log("[nexrender] FrameStart:", jobData.template.frameStart, "FrameEnd:", jobData.template.frameEnd);
 
   const result = await render(jobData, {
     binary,
-    workpath: jobData.workpath || "./storage/tmp/nexrender",
-    skipCleanup: true,
+    workpath,
+    skipCleanup: true, // We handle cleanup ourselves
     addLicense: false,
     debug: true,
   });
 
   console.log("[nexrender] Render complete. Output:", result.output);
-  console.log("[nexrender] Template dest:", result.template?.dest);
+  console.log("[nexrender] UID:", result.uid);
 
-  const { readdirSync } = await import("fs");
-  let outputFile = result.output;
+  let outputFile = null;
 
-  // Resolve PNG sequence pattern (result_[#####].png → result_00015.png)
-  if (outputFile && outputFile.includes("[#####]")) {
-    const dir = outputFile.substring(0, outputFile.lastIndexOf("/") === -1 ? outputFile.lastIndexOf("\\") : outputFile.lastIndexOf("/"));
-    const parentDir = dir || (result.workpath || jobData.workpath) + "/" + result.uid;
-    try {
-      const files = readdirSync(parentDir);
-      const pngFile = files.find(f => f.startsWith("result_") && f.endsWith(".png"));
-      if (pngFile) {
-        outputFile = parentDir + "/" + pngFile;
-        console.log("[nexrender] Resolved PNG pattern to:", outputFile);
-      }
-    } catch(e) {
-      console.log("[nexrender] Could not resolve PNG pattern:", e.message);
+  // Search the workdir for the output file
+  const workdir = path.join(workpath, result.uid);
+  if (existsSync(workdir)) {
+    const files = readdirSync(workdir);
+    console.log("[nexrender] Workdir files:", files.join(", "));
+
+    // Priority: PNG sequence > MP4 > AVI
+    const pngFile = files.find(f => f.startsWith("result_") && f.endsWith(".png"));
+    const mp4File = files.find(f => f === "output.mp4" || f === "result.mp4");
+    const aviFile = files.find(f => f === "result.avi");
+    const anyPng = files.find(f => f.endsWith(".png") && !f.includes("script"));
+
+    const found = pngFile || mp4File || aviFile || anyPng;
+    if (found) {
+      // Copy to a safe location outside the workdir
+      const safeName = "output-" + result.uid + path.extname(found);
+      const safePath = path.join(workpath, safeName);
+      copyFileSync(path.join(workdir, found), safePath);
+      outputFile = safePath;
+      console.log("[nexrender] Saved output to:", safePath);
+    }
+  } else {
+    console.log("[nexrender] Workdir not found:", workdir);
+    // Try result.output directly
+    if (result.output && existsSync(result.output)) {
+      outputFile = result.output;
     }
   }
 
-  // If output still not found, search workdir
-  if (!outputFile || !existsSync(outputFile)) {
-    const workdir = result.workpath || jobData.workpath;
-    const uid = result.uid;
-    if (workdir && uid) {
-      const candidates = ["output.mp4", "result.mp4", "result.avi"];
-      const dir = workdir + "/" + uid;
-      try {
-        const files = readdirSync(dir);
-        console.log("[nexrender] Workdir files:", files.join(", "));
-        for (const c of candidates) {
-          const p = dir + "/" + c;
-          if (existsSync(p)) {
-            outputFile = p;
-            console.log("[nexrender] Found output at:", p);
-            break;
-          }
-        }
-        // Look for any PNG
-        if (!outputFile || !existsSync(outputFile)) {
-          const pngFile = files.find(f => f.endsWith(".png"));
-          if (pngFile) {
-            outputFile = dir + "/" + pngFile;
-            console.log("[nexrender] Found PNG output at:", outputFile);
-          }
-        }
-      } catch(e) {
-        console.log("[nexrender] Could not read workdir:", e.message);
-      }
-    }
+  if (!outputFile) {
+    throw new Error("Render completed but no output file found in: " + workdir);
   }
 
   writeFileSync(resultPath, JSON.stringify({ output: outputFile }));
