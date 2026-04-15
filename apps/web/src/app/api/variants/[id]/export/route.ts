@@ -45,7 +45,7 @@ export async function POST(
   try {
     const outputPath = await renderVideo(
       {
-        aepFilePath: variant.template.aepFilePath,
+        templateFilePath: variant.template.templateFilePath,
         manifest,
         fieldValues,
         outputVariantId: variant.outputVariantId ?? undefined,

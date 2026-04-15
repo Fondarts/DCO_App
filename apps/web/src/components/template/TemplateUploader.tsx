@@ -2,28 +2,23 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ManifestBuilder } from "./ManifestBuilder";
-import type { TemplateManifest } from "@dco/shared";
 
 export function TemplateUploader() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [aepFile, setAepFile] = useState<File | null>(null);
+  const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [thumbnail, setThumbnail] = useState<File | null>(null);
-  const [manifest, setManifest] = useState<TemplateManifest | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
+  const isMogrt = templateFile?.name.toLowerCase().endsWith(".mogrt");
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!name || !aepFile || !manifest) {
-      setError("Name, AEP file, and at least one editable field are required");
-      return;
-    }
-    if (manifest.fields.length === 0) {
-      setError("Add at least one editable field");
+    if (!name || !templateFile) {
+      setError("Name and template file are required");
       return;
     }
 
@@ -31,13 +26,10 @@ export function TemplateUploader() {
     setError("");
 
     try {
-      const finalManifest: TemplateManifest = { ...manifest, name };
-
       const formData = new FormData();
       formData.append("name", name);
       formData.append("description", description);
-      formData.append("manifest", JSON.stringify(finalManifest));
-      formData.append("aepFile", aepFile);
+      formData.append("templateFile", templateFile);
       if (thumbnail) formData.append("thumbnail", thumbnail);
 
       const res = await fetch("/api/templates", {
@@ -46,16 +38,21 @@ export function TemplateUploader() {
       });
 
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Upload failed");
+        let msg = `Upload failed (${res.status})`;
+        try {
+          const data = await res.json();
+          msg = data.error || msg;
+        } catch {
+          // Response wasn't JSON
+        }
+        throw new Error(msg);
       }
 
       setOpen(false);
       setName("");
       setDescription("");
-      setAepFile(null);
+      setTemplateFile(null);
       setThumbnail(null);
-      setManifest(null);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
@@ -97,6 +94,29 @@ export function TemplateUploader() {
         </div>
       )}
 
+      {/* Template file */}
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">
+          Template File
+        </label>
+        <input
+          type="file"
+          accept=".mogrt,.aep,.aepx"
+          onChange={(e) => setTemplateFile(e.target.files?.[0] || null)}
+          className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-800 file:text-gray-300 hover:file:bg-gray-700"
+          required
+        />
+        {templateFile && (
+          <p className="text-xs mt-1 text-gray-500">
+            {isMogrt ? (
+              <span className="text-blue-400">MOGRT - fields will be auto-detected from Essential Graphics</span>
+            ) : (
+              <span className="text-yellow-400">AEP - use the CEP panel in After Effects to configure fields</span>
+            )}
+          </p>
+        )}
+      </div>
+
       {/* Basic info */}
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -119,42 +139,23 @@ export function TemplateUploader() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            placeholder="Brief description of the template"
+            placeholder="Brief description"
           />
         </div>
       </div>
 
-      {/* Files */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
-            AEP File (.aep)
-          </label>
-          <input
-            type="file"
-            accept=".aep,.aepx"
-            onChange={(e) => setAepFile(e.target.files?.[0] || null)}
-            className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-800 file:text-gray-300 hover:file:bg-gray-700"
-            required
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
-            Thumbnail (optional)
-          </label>
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => setThumbnail(e.target.files?.[0] || null)}
-            className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-800 file:text-gray-300 hover:file:bg-gray-700"
-          />
-        </div>
+      {/* Thumbnail */}
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">
+          Thumbnail (optional)
+        </label>
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setThumbnail(e.target.files?.[0] || null)}
+          className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-gray-800 file:text-gray-300 hover:file:bg-gray-700"
+        />
       </div>
-
-      <hr className="border-gray-800" />
-
-      {/* Manifest builder */}
-      <ManifestBuilder onChange={setManifest} />
 
       <button
         type="submit"

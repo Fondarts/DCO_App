@@ -26,18 +26,24 @@ const PRESET_OUTPUT_VARIANTS: OutputVariant[] = [
   { id: "vertical", width: 1080, height: 1920, label: "9:16 Vertical" },
 ];
 
-function nexrenderAssetForType(type: FieldType) {
+function nexrenderAssetForType(type: FieldType): { type: "data" | "image" | "footage" | "audio"; property?: string } {
   switch (type) {
     case "text":
-      return { type: "data" as const, property: "Source Text" };
+      return { type: "data", property: "Source Text" };
     case "color":
-      return { type: "data" as const, property: "Effects.Fill.Color" };
+      return { type: "data", property: "Effects.Fill.Color" };
+    case "slider":
+    case "point":
+    case "checkbox":
+    case "dropdown":
+    case "font":
+      return { type: "data", property: "" };
     case "image":
-      return { type: "image" as const };
+      return { type: "image" };
     case "video":
-      return { type: "footage" as const };
+      return { type: "footage" };
     case "audio":
-      return { type: "audio" as const };
+      return { type: "audio" };
   }
 }
 
@@ -67,6 +73,7 @@ interface EditableField {
   key: number; // for React keys
   label: string;
   layerName: string;
+  parameterName: string; // MOGRT Essential Graphics parameter name
   type: FieldType;
   defaultValue: string;
   maxLength: number;
@@ -90,6 +97,7 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
     square: false,
     vertical: false,
   });
+  const [variantCompositions, setVariantCompositions] = useState<Record<string, string>>({});
 
   // Build manifest whenever anything changes
   const buildManifest = useCallback((): TemplateManifest => {
@@ -97,6 +105,7 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
       id: makeFieldId(f.label) || `field_${i}`,
       layerName: f.layerName || f.label,
       layerIndex: i + 1,
+      parameterName: f.parameterName || f.label,
       type: f.type,
       label: f.label,
       default: f.type === "color" ? [0.2, 0.4, 0.9] : f.defaultValue || null,
@@ -107,9 +116,12 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
       nexrenderAsset: nexrenderAssetForType(f.type),
     }));
 
-    const outputVariants = PRESET_OUTPUT_VARIANTS.filter(
-      (v) => enabledVariants[v.id]
-    );
+    const outputVariants = PRESET_OUTPUT_VARIANTS
+      .filter((v) => enabledVariants[v.id])
+      .map((v) => ({
+        ...v,
+        ...(variantCompositions[v.id] ? { composition: variantCompositions[v.id] } : {}),
+      }));
 
     return {
       templateId: "",
@@ -125,7 +137,7 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
       scenes: [],
       outputVariants,
     };
-  }, [fields, composition, width, height, fps, duration, enabledVariants]);
+  }, [fields, composition, width, height, fps, duration, enabledVariants, variantCompositions]);
 
   useEffect(() => {
     onChange(buildManifest());
@@ -138,6 +150,7 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
         key: nextKey,
         label: "",
         layerName: "",
+        parameterName: "",
         type: "text",
         defaultValue: "",
         maxLength: 50,
@@ -275,32 +288,50 @@ export function ManifestBuilder({ onChange }: ManifestBuilderProps) {
         <h4 className="text-sm font-semibold text-gray-200 mb-3">
           Output Formats
         </h4>
-        <div className="flex gap-3">
+        <div className="space-y-2">
           {PRESET_OUTPUT_VARIANTS.map((variant) => (
-            <label
-              key={variant.id}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded cursor-pointer transition-colors ${
-                enabledVariants[variant.id]
-                  ? "bg-blue-600/20 border border-blue-500/50 text-blue-300"
-                  : "bg-gray-800 border border-gray-700 text-gray-400 hover:border-gray-600"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={enabledVariants[variant.id] || false}
-                onChange={(e) =>
-                  setEnabledVariants((prev) => ({
-                    ...prev,
-                    [variant.id]: e.target.checked,
-                  }))
-                }
-                className="accent-blue-500"
-              />
-              <span className="text-sm font-medium">{variant.label}</span>
-              <span className="text-xs text-gray-500">
-                {variant.width}x{variant.height}
-              </span>
-            </label>
+            <div key={variant.id} className="flex items-center gap-3">
+              <label
+                className={`flex items-center gap-2 px-4 py-2.5 rounded cursor-pointer transition-colors shrink-0 ${
+                  enabledVariants[variant.id]
+                    ? "bg-blue-600/20 border border-blue-500/50 text-blue-300"
+                    : "bg-gray-800 border border-gray-700 text-gray-400 hover:border-gray-600"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={enabledVariants[variant.id] || false}
+                  onChange={(e) =>
+                    setEnabledVariants((prev) => ({
+                      ...prev,
+                      [variant.id]: e.target.checked,
+                    }))
+                  }
+                  className="accent-blue-500"
+                />
+                <span className="text-sm font-medium">{variant.label}</span>
+                <span className="text-xs text-gray-500">
+                  {variant.width}x{variant.height}
+                </span>
+              </label>
+              {enabledVariants[variant.id] && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-gray-500 shrink-0">Comp:</label>
+                  <input
+                    type="text"
+                    value={variantCompositions[variant.id] || ""}
+                    onChange={(e) =>
+                      setVariantCompositions((prev) => ({
+                        ...prev,
+                        [variant.id]: e.target.value,
+                      }))
+                    }
+                    placeholder={composition || "same as main"}
+                    className="w-40 px-2 py-1 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-600"
+                  />
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </div>
@@ -380,7 +411,21 @@ function FieldRow({
           />
         </div>
 
-        {/* Layer name */}
+        {/* EG Parameter Name (for MOGRT) */}
+        <div className="flex-1">
+          <label className="block text-xs text-gray-400 mb-1">
+            EG Parameter Name
+          </label>
+          <input
+            type="text"
+            value={field.parameterName}
+            onChange={(e) => onUpdate({ parameterName: e.target.value })}
+            placeholder="e.g. Title, Brand Color"
+            className="w-full px-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+        </div>
+
+        {/* Layer name (for media replacement) */}
         <div className="flex-1">
           <label className="block text-xs text-gray-400 mb-1">
             AE Layer Name

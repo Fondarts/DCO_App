@@ -14,6 +14,14 @@ renders/
 *.mp4
 *.avi
 *.aep
+*.mogrt
+
+# AE exports
+MOGRT/
+
+# Thumbnails & PSD
+dco_thumbnail*.png
+dco_thumbnail*.psd
 
 # Prisma SQLite
 apps/web/prisma/dev.db

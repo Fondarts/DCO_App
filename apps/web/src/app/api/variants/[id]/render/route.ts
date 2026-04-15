@@ -43,7 +43,7 @@ export async function POST(
     jobId: renderJob.id,
     variantId: variant.id,
     templateId: variant.template.id,
-    aepFilePath: variant.template.aepFilePath,
+    templateFilePath: variant.template.templateFilePath,
     manifest,
     fieldValues: parseFieldValues(variant.fieldValues),
     outputVariantId: variant.outputVariantId ?? undefined,

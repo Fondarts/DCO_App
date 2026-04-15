@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { TemplateUploader } from "@/components/template/TemplateUploader";
+import { TemplateCard } from "@/components/template/TemplateCard";
 
 export default async function TemplatesPage() {
   const session = await auth();
@@ -32,30 +33,16 @@ export default async function TemplatesPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
           {templates.map((template) => (
-            <div
+            <TemplateCard
               key={template.id}
-              className="bg-gray-900 border border-gray-800 rounded-lg p-5"
-            >
-              <div className="aspect-video bg-gray-800 rounded mb-3 flex items-center justify-center text-gray-600 text-sm">
-                {template.thumbnailPath ? "Thumbnail" : "No preview"}
-              </div>
-              <h3 className="font-semibold">{template.name}</h3>
-              {template.description && (
-                <p className="text-sm text-gray-400 mt-1">{template.description}</p>
-              )}
-              <div className="flex items-center justify-between mt-3 text-xs text-gray-500">
-                <span>{template._count.variants} variants</span>
-                <span
-                  className={`px-2 py-1 rounded ${
-                    template.status === "PUBLISHED"
-                      ? "bg-green-900/50 text-green-400"
-                      : "bg-gray-700 text-gray-400"
-                  }`}
-                >
-                  {template.status}
-                </span>
-              </div>
-            </div>
+              id={template.id}
+              name={template.name}
+              description={template.description}
+              thumbnailPath={template.thumbnailPath}
+              status={template.status}
+              variantCount={template._count.variants}
+              isAdmin={isAdmin}
+            />
           ))}
         </div>
       )}

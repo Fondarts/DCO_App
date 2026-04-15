@@ -32,20 +32,21 @@ model User {
 }
 
 model Template {
-  id             String             @id @default(uuid())
-  name           String
-  description    String?
-  version        Int                @default(1)
-  organizationId String
-  organization   Organization       @relation(fields: [organizationId], references: [id])
-  aepFilePath    String
-  thumbnailPath  String?
-  manifest       String             // JSON stored as string (SQLite)
-  status         String             @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
-  campaigns      CampaignTemplate[]
-  variants       Variant[]
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id               String             @id @default(uuid())
+  name             String
+  description      String?
+  version          Int                @default(1)
+  organizationId   String
+  organization     Organization       @relation(fields: [organizationId], references: [id])
+  templateFilePath String             @default("")
+  templateFormat   String             @default("aep") // aep, mogrt
+  thumbnailPath    String?
+  manifest         String             // JSON stored as string (SQLite)
+  status           String             @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  campaigns        CampaignTemplate[]
+  variants         Variant[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 }
 
 model Campaign {

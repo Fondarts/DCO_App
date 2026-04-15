@@ -45,9 +45,10 @@ export async function POST(
   try {
     const previewPath = await renderPreview(
       {
-        aepFilePath: variant.template.aepFilePath,
+        templateFilePath: variant.template.templateFilePath,
         manifest,
         fieldValues,
+        outputVariantId: variant.outputVariantId ?? undefined,
         orgId: session.user.organizationId,
       },
       variantId

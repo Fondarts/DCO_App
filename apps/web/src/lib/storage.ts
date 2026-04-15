@@ -19,9 +19,12 @@ export function getTemplatePath(orgId: string, templateId: string): string {
   return getStoragePath("orgs", orgId, "templates", templateId);
 }
 
-export function getTemplateAepPath(orgId: string, templateId: string, filename: string): string {
+export function getTemplateFilePath(orgId: string, templateId: string, filename: string): string {
   return getStoragePath("orgs", orgId, "templates", templateId, filename);
 }
+
+/** @deprecated Use getTemplateFilePath */
+export const getTemplateAepPath = getTemplateFilePath;
 
 export function getAssetPath(orgId: string, assetId: string, filename: string): string {
   return getStoragePath("orgs", orgId, "assets", assetId, filename);

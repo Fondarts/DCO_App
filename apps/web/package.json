@@ -10,7 +10,8 @@
     "db:migrate": "prisma migrate dev",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "postinstall": "node -e \"require('fs').copyFileSync('src/lib/mogrt-apply-essential.jsx','node_modules/nexrender-action-mogrt-template/applyEssentialValues.jsx')\" 2>nul || true"
   },
   "dependencies": {
     "@dco/shared": "*",
@@ -21,6 +22,7 @@
     "bcryptjs": "^3.0.0",
     "bullmq": "^5.0.0",
     "ioredis": "^5.4.0",
+    "nexrender-action-mogrt-template": "^0.0.4",
     "next": "16.2.3",
     "next-auth": "^5.0.0-beta.25",
     "react": "19.2.4",

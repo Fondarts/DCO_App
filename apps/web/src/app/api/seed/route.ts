@@ -6,6 +6,7 @@ import type { TemplateManifest } from "@dco/shared";
 const DEMO_MANIFEST: TemplateManifest = {
   templateId: "demo-template-001",
   name: "Product Ad 15s",
+  format: "aep",
   composition: "main_comp",
   outputModule: "H.264 - Match Render Settings",
   outputExt: "mp4",
@@ -119,7 +120,8 @@ export async function POST() {
       name: "Product Ad 15s",
       description: "15 second product advertisement template",
       organizationId: org.id,
-      aepFilePath: "storage/demo/template.aep",
+      templateFilePath: "storage/demo/template.aep",
+      templateFormat: "aep",
       manifest: JSON.stringify(DEMO_MANIFEST),
       status: "PUBLISHED",
     },

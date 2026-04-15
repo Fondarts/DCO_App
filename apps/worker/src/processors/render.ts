@@ -28,7 +28,7 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
   const payload = job.data;
   console.log(`[Render] Processing job ${payload.jobId}`);
   console.log(`[Render] Template: ${payload.manifest.name}`);
-  console.log(`[Render] AEP: ${payload.aepFilePath}`);
+  console.log(`[Render] Template: ${payload.templateFilePath}`);
 
   try {
     // Update status to RENDERING
