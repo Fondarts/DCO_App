@@ -70,16 +70,27 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
 
     if (isPreview) {
       // Preview: render + extract frame
-      const { StorageKeys } = await import("@dco/shared");
-      const previewKey = StorageKeys.preview(payload.orgId || "", payload.variantId);
       const previewLocalPath = path.join(
         process.env.WORKER_WORKDIR || "./storage/tmp",
         `preview-${payload.variantId}.png`
       );
       outputPath = await engine.renderPreview(renderRequest, previewLocalPath, progressCallback);
-      // Upload preview to storage if using S3
-      if (process.env.STORAGE_PROVIDER === "s3") {
-        await engine.uploadResult(outputPath, previewKey);
+
+      // Upload preview PNG to web server via API
+      try {
+        const { readFile } = await import("fs/promises");
+        const pngData = await readFile(outputPath);
+        const base64 = pngData.toString("base64");
+        await fetch(`${API_URL}/api/worker/preview/${payload.variantId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${API_KEY}`,
+          },
+          body: JSON.stringify({ imageBase64: base64 }),
+        });
+      } catch (uploadErr) {
+        console.warn("[Worker] Preview upload failed:", uploadErr);
       }
     } else {
       // Full render

@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model Organization {
@@ -81,6 +82,7 @@ model Variant {
   campaign        Campaign    @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   fieldValues     String      @default("{}") // JSON stored as string (SQLite)
   outputVariantId String?
+  previewData     String?     // Base64-encoded preview PNG (for remote rendering)
   renderJobs      RenderJob[]
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt

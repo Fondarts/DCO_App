@@ -152,8 +152,8 @@ export function VariantEditor({
         const job = await res.json();
 
         if (job.status === "COMPLETED") {
-          // Fetch the preview image
-          const previewRes = await fetch(`/api/variants/${variantId}/preview`);
+          // Fetch the preview image (try worker-uploaded preview first, then local)
+          const previewRes = await fetch(`/api/worker/preview/${variantId}`);
           if (previewRes.ok) {
             const blob = await previewRes.blob();
             if (gen !== renderGenRef.current) return;
