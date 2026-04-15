@@ -67,12 +67,21 @@ try {
       try {
         const files = readdirSync(dir);
         console.log("[nexrender] Workdir files:", files.join(", "));
+        // Check exact candidates first
         for (const c of candidates) {
           const p = dir + "/" + c;
           if (existsSync(p)) {
             outputFile = p;
             console.log("[nexrender] Found output at:", p);
             break;
+          }
+        }
+        // If not found, look for PNG files (single-frame preview renders)
+        if (!outputFile || !existsSync(outputFile)) {
+          const pngFile = files.find(f => f.startsWith("result_") && f.endsWith(".png"));
+          if (pngFile) {
+            outputFile = dir + "/" + pngFile;
+            console.log("[nexrender] Found PNG output at:", outputFile);
           }
         }
       } catch(e) {
