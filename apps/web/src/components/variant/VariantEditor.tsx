@@ -112,13 +112,20 @@ export function VariantEditor({
         body: JSON.stringify({ fieldValues: fieldValuesRef.current }),
       });
 
+      if (res.status === 202) {
+        // Async: preview was queued, poll for result
+        const { jobId } = await res.json();
+        await pollPreviewJob(jobId, gen);
+        return;
+      }
+
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Preview failed");
       }
 
-      // Check if this render is still current
-      if (gen !== renderGenRef.current) return; // stale, discard
+      // Sync: preview returned directly as PNG
+      if (gen !== renderGenRef.current) return;
 
       const blob = await res.blob();
       setAePreviewUrl((prev) => {
@@ -132,6 +139,44 @@ export function VariantEditor({
       setPreviewSource("html");
     }
   }, [mode, variantId, outputVariantId]);
+
+  // Poll for async preview completion
+  async function pollPreviewJob(jobId: string, gen: number) {
+    for (let i = 0; i < 120; i++) { // ~6 minutes max
+      await new Promise((r) => setTimeout(r, 3000));
+      if (gen !== renderGenRef.current) return; // stale
+
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) continue;
+        const job = await res.json();
+
+        if (job.status === "COMPLETED") {
+          // Fetch the preview image
+          const previewRes = await fetch(`/api/variants/${variantId}/preview`);
+          if (previewRes.ok) {
+            const blob = await previewRes.blob();
+            if (gen !== renderGenRef.current) return;
+            setAePreviewUrl((prev) => {
+              if (prev) URL.revokeObjectURL(prev);
+              return URL.createObjectURL(blob);
+            });
+            setPreviewSource("ae-ready");
+          }
+          return;
+        }
+
+        if (job.status === "FAILED") {
+          throw new Error(job.errorMessage || "Preview render failed");
+        }
+      } catch (err) {
+        if (gen !== renderGenRef.current) return;
+        setPreviewError(err instanceof Error ? err.message : "Preview poll failed");
+        setPreviewSource("html");
+        return;
+      }
+    }
+  }
 
   // Debounce: restart timer on field changes
   useEffect(() => {

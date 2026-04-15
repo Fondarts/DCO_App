@@ -1,4 +1,5 @@
 import { Job } from "bullmq";
+import path from "path";
 import type { RenderJobPayload } from "@dco/shared";
 import { RenderEngine } from "../lib/render-engine";
 
@@ -40,35 +41,56 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
   console.log(`[Worker] Template: ${payload.manifest.name} (${payload.manifest.format})`);
   console.log(`[Worker] File: ${payload.templateFilePath}`);
 
+  const isPreview = payload.type === "preview";
+
   try {
     await updateJobStatus(payload.jobId, "RENDERING", {
       startedAt: new Date().toISOString(),
     });
     await job.updateProgress(10);
 
-    const outputPath = await engine.render(
-      {
-        templateFilePath: payload.templateFilePath,
-        manifest: payload.manifest,
-        fieldValues: payload.fieldValues,
-        outputVariantId: payload.outputVariantId,
-        jobId: payload.jobId,
-      },
-      async (progress) => {
-        // Report progress back to BullMQ and web API
-        await job.updateProgress(progress.progress);
+    const renderRequest = {
+      templateFilePath: payload.templateFilePath,
+      manifest: payload.manifest,
+      fieldValues: payload.fieldValues,
+      outputVariantId: payload.outputVariantId,
+      jobId: payload.jobId,
+    };
 
-        if (progress.phase === "ENCODING") {
-          await updateJobStatus(payload.jobId, "ENCODING", {
-            progress: progress.progress,
-          });
-        } else if (progress.phase === "RENDERING") {
-          await updateJobStatus(payload.jobId, "RENDERING", {
-            progress: progress.progress,
-          });
-        }
+    const progressCallback = async (progress: { phase: string; progress: number }) => {
+      await job.updateProgress(progress.progress);
+      if (progress.phase === "ENCODING") {
+        await updateJobStatus(payload.jobId, "ENCODING", { progress: progress.progress });
+      } else if (progress.phase === "RENDERING") {
+        await updateJobStatus(payload.jobId, "RENDERING", { progress: progress.progress });
       }
-    );
+    };
+
+    let outputPath: string;
+
+    if (isPreview) {
+      // Preview: render + extract frame
+      const { StorageKeys } = await import("@dco/shared");
+      const previewKey = StorageKeys.preview(payload.orgId || "", payload.variantId);
+      const previewLocalPath = path.join(
+        process.env.WORKER_WORKDIR || "./storage/tmp",
+        `preview-${payload.variantId}.png`
+      );
+      outputPath = await engine.renderPreview(renderRequest, previewLocalPath, progressCallback);
+      // Upload preview to storage if using S3
+      if (process.env.STORAGE_PROVIDER === "s3") {
+        await engine.uploadResult(outputPath, previewKey);
+      }
+    } else {
+      // Full render
+      outputPath = await engine.render(renderRequest, progressCallback);
+      // Upload render to storage if using S3
+      if (process.env.STORAGE_PROVIDER === "s3" && payload.orgId) {
+        const { StorageKeys } = await import("@dco/shared");
+        const renderKey = StorageKeys.render(payload.orgId, payload.jobId);
+        await engine.uploadResult(outputPath, renderKey);
+      }
+    }
 
     await job.updateProgress(100);
     await updateJobStatus(payload.jobId, "COMPLETED", {
@@ -76,7 +98,7 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
       completedAt: new Date().toISOString(),
     });
 
-    console.log(`[Worker] Job ${payload.jobId} completed: ${outputPath}`);
+    console.log(`[Worker] Job ${payload.jobId} (${isPreview ? "preview" : "render"}) completed: ${outputPath}`);
     return { success: true, outputPath };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

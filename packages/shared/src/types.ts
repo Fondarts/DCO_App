@@ -106,6 +106,10 @@ export interface RenderJobPayload {
   manifest: TemplateManifest;
   fieldValues: Record<string, unknown>;
   outputVariantId?: string;
+  /** "render" for full video, "preview" for single-frame PNG */
+  type?: "render" | "preview";
+  /** Org ID for storage key resolution */
+  orgId?: string;
 }
 
 // --- AE Rendering Types ---

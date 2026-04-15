@@ -6,6 +6,25 @@ import { renderPreview } from "@/lib/aerender";
 import { getPreviewOutputPath } from "@/lib/storage";
 import { readFile } from "fs/promises";
 import { existsSync } from "fs";
+import type { RenderJobPayload } from "@dco/shared";
+
+function getRenderMode() {
+  return process.env.RENDER_MODE || "auto";
+}
+
+async function tryEnqueuePreview(payload: RenderJobPayload): Promise<boolean> {
+  try {
+    const { getRenderQueue } = await import("@/lib/queue");
+    const queue = getRenderQueue();
+    await queue.add("preview", payload, {
+      jobId: payload.jobId,
+      priority: 1, // Higher priority than regular renders
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(
   req: NextRequest,
@@ -41,7 +60,52 @@ export async function POST(
   }
 
   const manifest = parseManifest(variant.template.manifest);
+  const mode = getRenderMode();
 
+  // Try async dispatch when mode is "queue" or "auto"
+  if (mode === "queue" || mode === "auto") {
+    const previewJob = await prisma.renderJob.create({
+      data: {
+        variantId: variant.id,
+        submittedById: session.user.id,
+        status: "PENDING",
+      },
+    });
+
+    const payload: RenderJobPayload = {
+      jobId: previewJob.id,
+      variantId: variant.id,
+      templateId: variant.template.id,
+      templateFilePath: variant.template.templateFilePath,
+      manifest,
+      fieldValues,
+      outputVariantId: variant.outputVariantId ?? undefined,
+      type: "preview",
+      orgId: session.user.organizationId,
+    };
+
+    const queued = await tryEnqueuePreview(payload);
+
+    if (queued) {
+      await prisma.renderJob.update({
+        where: { id: previewJob.id },
+        data: { status: "QUEUED" },
+      });
+      return NextResponse.json(
+        { jobId: previewJob.id, status: "QUEUED" },
+        { status: 202 }
+      );
+    }
+
+    // Clean up if we can't queue and mode is "queue"
+    await prisma.renderJob.delete({ where: { id: previewJob.id } }).catch(() => {});
+    if (mode === "queue") {
+      return NextResponse.json({ error: "Queue unavailable" }, { status: 503 });
+    }
+    // Fall through to local render for "auto"
+  }
+
+  // Local render (sync)
   try {
     const previewPath = await renderPreview(
       {
