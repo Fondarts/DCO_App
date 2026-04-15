@@ -125,9 +125,15 @@ function loadCompositionInfo() {
 }
 
 // --- MOGRT: Scan Essential Graphics ---
+function reloadJSX(callback) {
+  var jsxPath = cs.getSystemPath("extension") + "/jsx/hostscript.jsx";
+  cs.evalScript('$.evalFile("' + jsxPath.replace(/\\/g, "\\\\") + '")', callback);
+}
+
 function scanEssentialGraphics() {
-  setStatus("Scanning Essential Graphics parameters...");
-  cs.evalScript("getEssentialGraphicsParameters()", function(result) {
+  setStatus("Reloading scripts & scanning...");
+  reloadJSX(function() {
+    cs.evalScript("getEssentialGraphicsParameters()", function(result) {
     document.getElementById("debug-output").textContent = "EG RAW: " + result;
 
     var data;
@@ -160,7 +166,7 @@ function scanEssentialGraphics() {
       var param = paramList[i];
       if (!param || !param.parameterName) continue;
 
-      fields.push({
+      var fieldObj = {
         parameterName: param.parameterName,
         layerName: param.layerName || "",
         layerIndex: 0,
@@ -171,12 +177,17 @@ function scanEssentialGraphics() {
         label: param.label || param.parameterName,
         validation: null,
         composition: ""
-      });
+      };
+      if (param.choices && param.choices.length > 0) {
+        fieldObj.choices = param.choices;
+      }
+      fields.push(fieldObj);
     }
 
     renderFields();
     setStatus("Found " + fields.length + " Essential Graphics parameters");
   });
+  }); // reloadJSX callback
 }
 
 // --- MOGRT: Browse for .mogrt file ---
@@ -441,6 +452,10 @@ function buildManifest(comp, name) {
       "default": f.defaultValue,
       validation: f.validation || null
     };
+
+    if (f.choices && f.choices.length > 0) {
+      fieldDef.choices = f.choices;
+    }
 
     if (templateMode === "mogrt") {
       // MOGRT: use Essential Graphics parameter name

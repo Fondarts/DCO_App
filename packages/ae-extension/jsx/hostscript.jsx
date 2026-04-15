@@ -74,9 +74,38 @@ function getEssentialGraphicsParameters() {
               if (eInfo) {
                 eInfo.parameterName = effect.name;
                 eInfo.label = effect.name;
-                // Detect dropdown controls by effect matchName
-                if (mn === "ADBE Dropdown Control") {
+
+                // Detect dropdown controls:
+                // Standard AE: matchName === "ADBE Dropdown Control"
+                // AE Beta: matchName is Pseudo/@@..., detect by property name "Menu"
+                var isDropdown = (mn === "ADBE Dropdown Control");
+                if (!isDropdown) {
+                  try {
+                    var firstProp = effect.property(1);
+                    if (firstProp && firstProp.name === "Menu") isDropdown = true;
+                  } catch(edp) {}
+                }
+                // Also check effect name as fallback
+                if (!isDropdown && effect.name.indexOf("Dropdown") >= 0) {
+                  isDropdown = true;
+                }
+
+                if (isDropdown) {
                   eInfo.fieldType = "dropdown";
+                  eInfo.choices = [];
+                  try {
+                    var menuProp2 = effect.property(1);
+                    if (typeof menuProp2.getPropertyParameters === "function") {
+                      var params = menuProp2.getPropertyParameters();
+                      if (params && params.length) {
+                        for (var pi = 0; pi < params.length; pi++) {
+                          eInfo.choices.push(String(params[pi]));
+                        }
+                      }
+                    }
+                  } catch(edc) {
+                    debugLog.push("Dropdown choices err: " + edc.message);
+                  }
                 }
                 results.push(eInfo);
                 break; // one value per effect
