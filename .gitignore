@@ -30,3 +30,4 @@ apps/web/prisma/dev.db-journal
 # Claude
 .claude/
 REMOTE_TEST/
+apps/worker/storage/
