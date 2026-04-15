@@ -1,83 +1,86 @@
 import { Job } from "bullmq";
 import type { RenderJobPayload } from "@dco/shared";
+import { RenderEngine } from "../lib/render-engine";
 
-// Database update helper - calls the web API to update job status
+const API_URL = process.env.API_URL || "http://localhost:3000";
+const API_KEY = process.env.WORKER_API_KEY || "worker-secret";
+
+// Single engine instance per worker process
+const engine = new RenderEngine();
+
+// --- Status update helper ---
+
 async function updateJobStatus(
   jobId: string,
   status: string,
   data?: Record<string, unknown>
 ) {
-  const apiUrl = process.env.API_URL || "http://localhost:3000";
-  const apiKey = process.env.WORKER_API_KEY || "worker-secret";
-
   try {
-    await fetch(`${apiUrl}/api/worker/jobs/${jobId}`, {
+    const res = await fetch(`${API_URL}/api/worker/jobs/${jobId}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${API_KEY}`,
       },
       body: JSON.stringify({ status, ...data }),
     });
+    if (!res.ok) {
+      console.error(`[Worker] Status update failed (${res.status}): ${await res.text()}`);
+    }
   } catch (err) {
-    console.error(`Failed to update job ${jobId} status:`, err);
+    console.error(`[Worker] Failed to update job ${jobId}:`, err);
   }
 }
 
+// --- Main processor ---
+
 export async function processRenderJob(job: Job<RenderJobPayload>) {
   const payload = job.data;
-  console.log(`[Render] Processing job ${payload.jobId}`);
-  console.log(`[Render] Template: ${payload.manifest.name}`);
-  console.log(`[Render] Template: ${payload.templateFilePath}`);
+  console.log(`[Worker] Processing job ${payload.jobId}`);
+  console.log(`[Worker] Template: ${payload.manifest.name} (${payload.manifest.format})`);
+  console.log(`[Worker] File: ${payload.templateFilePath}`);
 
   try {
-    // Update status to RENDERING
     await updateJobStatus(payload.jobId, "RENDERING", {
       startedAt: new Date().toISOString(),
     });
     await job.updateProgress(10);
 
-    // TODO: Integrate nexrender when ready
-    // For now, log the job details for testing
-    console.log("[Render] Field values:", JSON.stringify(payload.fieldValues, null, 2));
-    console.log("[Render] Output variant:", payload.outputVariantId || "default");
+    const outputPath = await engine.render(
+      {
+        templateFilePath: payload.templateFilePath,
+        manifest: payload.manifest,
+        fieldValues: payload.fieldValues,
+        outputVariantId: payload.outputVariantId,
+        jobId: payload.jobId,
+      },
+      async (progress) => {
+        // Report progress back to BullMQ and web API
+        await job.updateProgress(progress.progress);
 
-    // Simulate render progress
-    // In production, this will be replaced by nexrender execution:
-    //
-    // import { render } from "@nexrender/core";
-    // const result = await render(nexrenderJob, {
-    //   workpath: "/tmp/nexrender",
-    //   binary: "C:/Program Files/Adobe/Adobe After Effects 2024/Support Files/aerender.exe",
-    //   skipCleanup: false,
-    //   addLicense: false,
-    //   onProgress: (job) => {
-    //     updateJobStatus(payload.jobId, "RENDERING", { progress: job.renderProgress });
-    //   },
-    // });
-
-    await job.updateProgress(50);
-
-    // Update status to ENCODING (FFmpeg post-process step)
-    await updateJobStatus(payload.jobId, "ENCODING");
-    await job.updateProgress(80);
-
-    // TODO: actual output path from nexrender
-    const outputPath = `storage/renders/${payload.jobId}.mp4`;
+        if (progress.phase === "ENCODING") {
+          await updateJobStatus(payload.jobId, "ENCODING", {
+            progress: progress.progress,
+          });
+        } else if (progress.phase === "RENDERING") {
+          await updateJobStatus(payload.jobId, "RENDERING", {
+            progress: progress.progress,
+          });
+        }
+      }
+    );
 
     await job.updateProgress(100);
-
-    // Update status to COMPLETED
     await updateJobStatus(payload.jobId, "COMPLETED", {
       outputPath,
       completedAt: new Date().toISOString(),
     });
 
-    console.log(`[Render] Job ${payload.jobId} completed`);
+    console.log(`[Worker] Job ${payload.jobId} completed: ${outputPath}`);
     return { success: true, outputPath };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error(`[Render] Job ${payload.jobId} failed:`, errorMessage);
+    console.error(`[Worker] Job ${payload.jobId} failed:`, errorMessage);
 
     await updateJobStatus(payload.jobId, "FAILED", {
       errorMessage,

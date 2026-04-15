@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { parseManifest, parseFieldValues } from "@/lib/json";
-import { renderVideo } from "@/lib/aerender";
+import { dispatchRender } from "@/lib/render-mode";
+import type { RenderJobPayload } from "@dco/shared";
 import { createReadStream, existsSync } from "fs";
 import { Readable } from "stream";
 
@@ -32,48 +33,46 @@ export async function POST(
   const manifest = parseManifest(variant.template.manifest);
   const fieldValues = parseFieldValues(variant.fieldValues);
 
-  // Create render job
+  // Create render job record
   const renderJob = await prisma.renderJob.create({
     data: {
       variantId: variant.id,
       submittedById: session.user.id,
-      status: "RENDERING",
-      startedAt: new Date(),
+      status: "PENDING",
     },
   });
 
+  const payload: RenderJobPayload = {
+    jobId: renderJob.id,
+    variantId: variant.id,
+    templateId: variant.template.id,
+    templateFilePath: variant.template.templateFilePath,
+    manifest,
+    fieldValues,
+    outputVariantId: variant.outputVariantId ?? undefined,
+  };
+
+  const renderOptions = {
+    templateFilePath: variant.template.templateFilePath,
+    manifest,
+    fieldValues,
+    outputVariantId: variant.outputVariantId ?? undefined,
+    orgId: session.user.organizationId,
+  };
+
   try {
-    const outputPath = await renderVideo(
-      {
-        templateFilePath: variant.template.templateFilePath,
-        manifest,
-        fieldValues,
-        outputVariantId: variant.outputVariantId ?? undefined,
-        orgId: session.user.organizationId,
-      },
-      renderJob.id
-    );
+    const result = await dispatchRender(renderJob.id, payload, renderOptions);
 
-    await prisma.renderJob.update({
-      where: { id: renderJob.id },
-      data: {
-        status: "COMPLETED",
-        progress: 100,
-        outputPath,
-        completedAt: new Date(),
-      },
-    });
+    if (result.mode === "queued") {
+      // Async: client should poll for status
+      return NextResponse.json({ jobId: renderJob.id, status: "QUEUED" }, { status: 202 });
+    }
 
-    return NextResponse.json({ success: true, jobId: renderJob.id });
+    // Synchronous local render completed
+    return NextResponse.json({ jobId: renderJob.id, status: "COMPLETED", success: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Export failed";
     console.error("[Export Error]", msg);
-
-    await prisma.renderJob.update({
-      where: { id: renderJob.id },
-      data: { status: "FAILED", errorMessage: msg },
-    });
-
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

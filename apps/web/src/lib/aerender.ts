@@ -249,7 +249,7 @@ async function extractFrame(
 
 // --- Public API ---
 
-interface RenderOptions {
+export interface RenderOptions {
   templateFilePath: string;
   manifest: TemplateManifest;
   fieldValues: Record<string, unknown>;

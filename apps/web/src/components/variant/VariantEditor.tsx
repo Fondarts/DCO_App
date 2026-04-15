@@ -216,6 +216,7 @@ export function VariantEditor({
     setSuccess("");
 
     try {
+      // Save current values first
       await fetch(`/api/variants/${variantId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -229,14 +230,55 @@ export function VariantEditor({
         throw new Error(data.error || "Export failed");
       }
 
-      setSuccess("Export complete!");
-      router.refresh();
-      window.open(`/api/variants/${variantId}/export`, "_blank");
+      const data = await res.json();
+
+      if (data.status === "QUEUED") {
+        // Async: poll for completion
+        setSuccess("Render queued...");
+        await pollJobUntilDone(data.jobId);
+      } else {
+        // Sync: already completed
+        setSuccess("Export complete!");
+        router.refresh();
+        window.open(`/api/variants/${variantId}/export`, "_blank");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Export failed");
     } finally {
       setExporting(false);
     }
+  }
+
+  async function pollJobUntilDone(jobId: string) {
+    const maxAttempts = 200; // ~10 minutes at 3s intervals
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) continue;
+        const job = await res.json();
+
+        if (job.status === "COMPLETED") {
+          setSuccess("Export complete!");
+          router.refresh();
+          window.open(`/api/jobs/${jobId}?download=true`, "_blank");
+          return;
+        }
+
+        if (job.status === "FAILED") {
+          throw new Error(job.errorMessage || "Render failed");
+        }
+
+        // Still in progress
+        const statusMsg = job.status === "ENCODING" ? "Encoding..." : "Rendering...";
+        setSuccess(`${statusMsg} (${job.progress || 0}%)`);
+      } catch (err) {
+        if (err instanceof Error && err.message !== "Render failed") continue;
+        throw err;
+      }
+    }
+    throw new Error("Render timed out");
   }
 
   return (
