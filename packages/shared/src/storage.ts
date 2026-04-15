@@ -37,8 +37,11 @@ export function createStorageProvider(overrideType?: string): StorageProvider {
   const type = overrideType || process.env.STORAGE_PROVIDER || "local";
 
   if (type === "s3") {
-    const { S3StorageProvider } = require("./storage-s3");
-    return new S3StorageProvider();
+    // Only loaded when STORAGE_PROVIDER=s3 — requires @aws-sdk packages installed
+    throw new Error(
+      "S3 storage requires manual setup: npm install @aws-sdk/client-s3 @aws-sdk/s3-request-presigner, " +
+      "then import S3StorageProvider directly from '@dco/shared/storage-s3'"
+    );
   }
 
   const { LocalStorageProvider } = require("./storage-local");
