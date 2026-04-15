@@ -397,9 +397,9 @@ function sendToDCO() {
 
   setStatus("Preparing upload...");
 
-  // If MOGRT mode and no .mogrt selected, export one automatically
+  // If MOGRT mode and no .mogrt selected, export automatically
   if (templateMode === "mogrt" && !mogrtPath) {
-    setStatus("Exporting .mogrt...");
+    setStatus("Exporting main .mogrt...");
     cs.evalScript("exportMogrt()", function(exportResult) {
       var exportData;
       try { exportData = JSON.parse(exportResult); } catch(e) {
@@ -415,13 +415,80 @@ function sendToDCO() {
       }
       mogrtPath = exportData.path;
       document.getElementById("mogrt-path-display").textContent = mogrtPath.split(/[/\\]/).pop();
-      setStatus("MOGRT exported, uploading...");
+
+      // Export variant MOGRTs for each output variant with a composition
+      _exportVariantMogrts(function() {
+        setStatus("All MOGRTs exported, uploading...");
+        _doSendToDCO();
+      });
+    });
+    return;
+  }
+
+  // If MOGRT already selected, still export variants
+  if (templateMode === "mogrt") {
+    _exportVariantMogrts(function() {
       _doSendToDCO();
     });
     return;
   }
 
   _doSendToDCO();
+}
+
+// variantMogrtPaths: { variantId: localPath }
+var variantMogrtPaths = {};
+
+function _exportVariantMogrts(callback) {
+  variantMogrtPaths = {};
+
+  // Collect output variants that have a composition name
+  var variantsToExport = [];
+  if (document.getElementById("ov-landscape").checked) {
+    var lComp = document.getElementById("ov-landscape-comp").value.trim();
+    if (lComp) variantsToExport.push({ id: "landscape", comp: lComp });
+  }
+  if (document.getElementById("ov-square").checked) {
+    var sComp = document.getElementById("ov-square-comp").value.trim();
+    if (sComp) variantsToExport.push({ id: "square", comp: sComp });
+  }
+  if (document.getElementById("ov-vertical").checked) {
+    var vComp = document.getElementById("ov-vertical-comp").value.trim();
+    if (vComp) variantsToExport.push({ id: "vertical", comp: vComp });
+  }
+
+  if (variantsToExport.length === 0) {
+    callback();
+    return;
+  }
+
+  var idx = 0;
+  function exportNext() {
+    if (idx >= variantsToExport.length) {
+      callback();
+      return;
+    }
+    var v = variantsToExport[idx];
+    setStatus("Exporting MOGRT for " + v.comp + "...");
+    document.getElementById("debug-output").textContent += "\nExporting variant MOGRT: " + v.id + " comp=" + v.comp;
+    cs.evalScript('exportMogrtForComp("' + v.comp.replace(/"/g, '\\"') + '")', function(result) {
+      document.getElementById("debug-output").textContent += "\nResult for " + v.id + ": " + result;
+      try {
+        var data = JSON.parse(result);
+        if (data.success && data.path) {
+          variantMogrtPaths[v.id] = data.path;
+          setStatus("Exported: " + v.comp + " -> " + data.path.split(/[/\\]/).pop());
+        } else {
+          setStatus("Warning: " + (data.error || "export failed for " + v.comp));
+        }
+      } catch(e) {
+        setStatus("Warning: variant export parse error for " + v.comp);
+      }
+      idx++;
+      exportNext();
+    });
+  }
+  exportNext();
 }
 
 function _doSendToDCO() {
@@ -561,6 +628,13 @@ function uploadMogrtToDCO(templateName, manifest) {
   formData.append("name", templateName);
   formData.append("manifest", JSON.stringify(manifest));
   formData.append("localFilePath", mogrtPath);
+
+  // Send variant MOGRT paths
+  var variantKeys = Object.keys(variantMogrtPaths);
+  document.getElementById("debug-output").textContent += "\nVariant MOGRTs to upload: " + JSON.stringify(variantMogrtPaths);
+  if (variantKeys.length > 0) {
+    formData.append("variantMogrtPaths", JSON.stringify(variantMogrtPaths));
+  }
 
   if (thumbnailPath) {
     readFileAsBlob(thumbnailPath, function(terr, thumbBuffer) {

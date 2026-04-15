@@ -243,9 +243,17 @@ export function VariantEditor({
     <div>
       {/* Header */}
       <div className="mb-6">
-        <Link href={`/campaigns/${campaignId}`} className="text-sm text-gray-500 hover:text-gray-300">
-          &larr; {campaignName}
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href={`/campaigns/${campaignId}`} className="text-sm text-gray-500 hover:text-gray-300">
+            &larr; {campaignName}
+          </Link>
+          <Link
+            href={`/campaigns/${campaignId}/batch?templateId=${templateId}`}
+            className="text-sm text-purple-400 hover:text-purple-300"
+          >
+            Bulk Edit
+          </Link>
+        </div>
         <h2 className="text-2xl font-bold mt-1">
           {mode === "create" ? "New Variant" : `Edit: ${variantName}`}
         </h2>

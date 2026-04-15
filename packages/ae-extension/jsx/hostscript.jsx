@@ -1207,3 +1207,51 @@ function exportMogrt() {
     debug: attempts.join(" | ")
   });
 }
+
+// Export MOGRT for a specific composition by name
+function exportMogrtForComp(compName) {
+  var proj = app.project;
+  if (!proj.file) {
+    return JSON.stringify({ error: "Save the AE project first." });
+  }
+
+  // Find the comp
+  var comp = null;
+  for (var i = 1; i <= proj.numItems; i++) {
+    var item = proj.item(i);
+    if (item instanceof CompItem && item.name === compName) {
+      comp = item;
+      break;
+    }
+  }
+  if (!comp) {
+    return JSON.stringify({ error: "Comp not found: " + compName });
+  }
+
+  if (typeof comp.exportAsMotionGraphicsTemplate !== "function") {
+    return JSON.stringify({ error: "exportAsMotionGraphicsTemplate not available." });
+  }
+
+  var safeName = compName.replace(/[^a-zA-Z0-9_-]/g, "_") || "variant";
+  var outDir = proj.file.parent;
+  var outFile = new File(outDir.absoluteURI + "/" + safeName + ".mogrt");
+
+  try {
+    comp.exportAsMotionGraphicsTemplate(true, outFile);
+    if (outFile.exists) {
+      return JSON.stringify({ success: true, path: outFile.fsName, compName: compName });
+    }
+  } catch(e) {}
+
+  // Fallback: try string path
+  try {
+    var p2 = outDir.fsName + "\\" + safeName + ".mogrt";
+    comp.exportAsMotionGraphicsTemplate(true, p2);
+    var f2 = new File(p2);
+    if (f2.exists) {
+      return JSON.stringify({ success: true, path: f2.fsName, compName: compName });
+    }
+  } catch(e2) {}
+
+  return JSON.stringify({ error: "Export failed for comp: " + compName });
+}

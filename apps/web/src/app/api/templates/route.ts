@@ -177,6 +177,42 @@ export async function POST(req: NextRequest) {
     await writeFile(thumbnailPath, thumbBuffer);
   }
 
+  // Copy variant MOGRT files and update manifest outputVariants with paths
+  const variantMogrtPathsJson = formData.get("variantMogrtPaths") as string | null;
+  if (variantMogrtPathsJson) {
+    try {
+      const { statSync, readdirSync } = await import("fs");
+      const variantPaths = JSON.parse(variantMogrtPathsJson) as Record<string, string>;
+      for (const [variantId, localPath] of Object.entries(variantPaths)) {
+        if (!localPath || !existsSync(localPath)) continue;
+
+        // AE sometimes exports .mogrt as a folder containing the actual file
+        let resolvedPath = localPath;
+        if (statSync(resolvedPath).isDirectory()) {
+          const files = readdirSync(resolvedPath);
+          const mogrtFile = files.find((f: string) => f.endsWith(".mogrt"));
+          if (mogrtFile) {
+            resolvedPath = require("path").join(resolvedPath, mogrtFile);
+          }
+        }
+        if (!existsSync(resolvedPath) || statSync(resolvedPath).isDirectory()) continue;
+
+        const variantFileName = `variant-${variantId}.mogrt`;
+        const destPath = getTemplateFilePath(orgId, template.id, variantFileName);
+        await copyFile(resolvedPath, destPath);
+        console.log(`[templates] Stored variant MOGRT: ${variantId} -> ${destPath}`);
+
+        // Update the matching outputVariant in manifest with the MOGRT path
+        const ov = manifest.outputVariants.find((v) => v.id === variantId);
+        if (ov) {
+          (ov as unknown as Record<string, unknown>).mogrtPath = destPath;
+        }
+      }
+    } catch (err) {
+      console.warn("[templates] Warning: variant MOGRT copy error:", err);
+    }
+  }
+
   // Update with file paths and manifest
   const updated = await prisma.template.update({
     where: { id: template.id },

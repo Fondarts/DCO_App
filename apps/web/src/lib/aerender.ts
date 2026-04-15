@@ -269,7 +269,16 @@ function buildJob(options: RenderOptions): { isMogrt: boolean } & Record<string,
   const isMogrt = options.manifest.format === "mogrt";
 
   if (isMogrt) {
-    const config = buildMogrtJobConfig(options.templateFilePath, options.manifest, options.fieldValues);
+    // Check if the selected output variant has its own MOGRT file
+    let mogrtPath = options.templateFilePath;
+    if (options.outputVariantId) {
+      const variant = options.manifest.outputVariants.find((v) => v.id === options.outputVariantId);
+      const variantMogrt = (variant as Record<string, unknown> | undefined)?.mogrtPath as string | undefined;
+      if (variantMogrt && existsSync(variantMogrt)) {
+        mogrtPath = variantMogrt;
+      }
+    }
+    const config = buildMogrtJobConfig(mogrtPath, options.manifest, options.fieldValues);
     return { ...config, isMogrt: true };
   }
 
@@ -325,7 +334,9 @@ export async function renderVideo(
       "-crf": "18",
     };
 
-    if (variant && !variant.composition) {
+    // Scale via FFmpeg when variant has no native composition or MOGRT
+    const variantMogrt = (variant as Record<string, unknown> | null)?.mogrtPath as string | undefined;
+    if (variant && !variant.composition && !variantMogrt) {
       encodeParams["-vf"] =
         `scale=${variant.width}:${variant.height}:force_original_aspect_ratio=decrease,pad=${variant.width}:${variant.height}:(ow-iw)/2:(oh-ih)/2:color=black`;
     }
@@ -380,17 +391,29 @@ export async function renderPreview(
     }
 
     // Both formats output AVI → need encode for preview
+    const previewEncodeParams: Record<string, string> = {
+      "-vcodec": "libx264",
+      "-pix_fmt": "yuv420p",
+      "-preset": "ultrafast",
+      "-crf": "28",
+    };
+
+    // Scale for output variant when no native composition/MOGRT
+    const previewVariant = options.outputVariantId
+      ? options.manifest.outputVariants.find((v) => v.id === options.outputVariantId)
+      : null;
+    const pvMogrt = (previewVariant as Record<string, unknown> | null)?.mogrtPath as string | undefined;
+    if (previewVariant && !previewVariant.composition && !pvMogrt) {
+      previewEncodeParams["-vf"] =
+        `scale=${previewVariant.width}:${previewVariant.height}:force_original_aspect_ratio=decrease,pad=${previewVariant.width}:${previewVariant.height}:(ow-iw)/2:(oh-ih)/2:color=black`;
+    }
+
     actions.postrender = [
       {
         module: "@nexrender/action-encode",
         preset: "mp4",
         output: "output.mp4",
-        params: {
-          "-vcodec": "libx264",
-          "-pix_fmt": "yuv420p",
-          "-preset": "ultrafast",
-          "-crf": "28",
-        },
+        params: previewEncodeParams,
       },
     ];
 
