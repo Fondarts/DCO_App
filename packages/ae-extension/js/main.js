@@ -83,6 +83,23 @@ document.addEventListener("DOMContentLoaded", function() {
     });
   });
 
+  document.getElementById("btn-copy-debug").addEventListener("click", function() {
+    var text = document.getElementById("debug-output").textContent;
+    if (!text) { setStatus("No debug output to copy"); return; }
+    // CEP clipboard via CSInterface
+    try {
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setStatus("Debug output copied to clipboard!");
+    } catch(e) {
+      setStatus("Copy failed: " + e.message, true);
+    }
+  });
+
   document.getElementById("btn-debug").addEventListener("click", function() {
     cs.evalScript("debugSelectedProperties()", function(result) {
       try {
@@ -301,27 +318,31 @@ function renderFields() {
     var typeIcon = { text: "T", color: "C", image: "I", video: "V", audio: "A", slider: "#", point: "P", checkbox: "B", dropdown: "D", font: "F" }[f.fieldType] || "?";
     var typeClass = "type-" + f.fieldType;
 
-    var detailText = templateMode === "mogrt"
-      ? (f.parameterName || f.propertyName)
-      : (f.propertyPath || f.propertyName);
-
-    var compTag = f.composition ? ' <span style="color:#888;font-size:10px;">(' + escapeHtml(f.composition) + ')</span>' : '';
-    var layerTag = templateMode === "aep" ? ('<span class="field-layer">' + f.layerName + compTag + '</span>') : '';
-
     html += '<div class="field-item">' +
       '<div class="field-header">' +
         '<span class="field-type ' + typeClass + '">' + typeIcon + '</span>' +
-        (templateMode === "mogrt"
-          ? '<span class="field-layer">' + escapeHtml(f.parameterName || f.label) + '</span>'
-          : layerTag) +
-        '<button class="btn-remove" onclick="removeField(' + i + ')">×</button>' +
-      '</div>' +
-      '<div class="field-property">' + escapeHtml(detailText) + '</div>' +
-      '<div class="field-label-row">' +
-        '<label>Label:</label>' +
         '<input type="text" class="field-label-input" value="' + escapeHtml(f.label) + '" onchange="updateLabel(' + i + ', this.value)" />' +
-      '</div>' +
-    '</div>';
+        '<button class="btn-remove" onclick="removeField(' + i + ')">×</button>' +
+      '</div>';
+
+    // Show dropdown choices
+    if (f.fieldType === "dropdown" && f.choices && f.choices.length > 0) {
+      var choiceTexts = [];
+      for (var ci = 0; ci < f.choices.length; ci++) {
+        choiceTexts.push(escapeHtml(f.choices[ci]));
+      }
+      html += '<div class="field-choices">' + choiceTexts.join(' &middot; ') + '</div>';
+    }
+
+    // In AEP mode, show layer and property path
+    if (templateMode === "aep" && f.layerName) {
+      var detailText = f.layerName;
+      if (f.propertyPath) detailText += ' &rsaquo; ' + f.propertyPath;
+      if (f.composition) detailText += ' (' + f.composition + ')';
+      html += '<div class="field-detail">' + escapeHtml(detailText) + '</div>';
+    }
+
+    html += '</div>';
   }
   container.innerHTML = html;
 }

@@ -27,12 +27,24 @@ function getEssentialGraphicsParameters() {
   var results = [];
   var debugLog = [];
 
+  // Collect EG panel names for cross-referencing (even if Method 1 fails)
+  var egTopNames = [];
+  try {
+    var egPanel0 = comp.essentialProperty;
+    if (egPanel0 && egPanel0.numProperties > 0) {
+      _collectEGLeafNames(egPanel0, egTopNames, 0);
+      debugLog.push("EG names(" + egTopNames.length + "): " + egTopNames.join(", "));
+    }
+  } catch(ex0) {
+    debugLog.push("EG name scan err: " + ex0.toString());
+  }
+
   // Method 1: comp.essentialProperty (AE CC 2019+ / v16.0+)
   try {
     var egPanel = comp.essentialProperty;
     if (egPanel && egPanel.numProperties > 0) {
       debugLog.push("M1: essentialProperty np=" + egPanel.numProperties);
-      _scanEGGroupRecursive(egPanel, results, debugLog, 0);
+      _scanEGGroupRecursive(egPanel, results, debugLog, 0, "");
     } else {
       debugLog.push("M1: essentialProperty empty or null");
     }
@@ -75,15 +87,36 @@ function getEssentialGraphicsParameters() {
                 eInfo.parameterName = effect.name;
                 eInfo.label = effect.name;
 
+                // Derive better name from controller layer name ("[CTRL] X" → "X")
+                if (_isGenericControlName(eInfo.parameterName)) {
+                  var ctrlPrefix = "[CTRL] ";
+                  var lName = layer.name;
+                  if (lName.indexOf(ctrlPrefix) === 0) {
+                    var derived = lName.substring(ctrlPrefix.length);
+                    if (derived) {
+                      eInfo.parameterName = derived;
+                      eInfo.label = derived;
+                      debugLog.push("  derived name: " + derived);
+                    }
+                  }
+                }
+
                 // Detect dropdown controls:
                 // Standard AE: matchName === "ADBE Dropdown Control"
-                // AE Beta: matchName is Pseudo/@@..., detect by property name "Menu"
+                // Pseudo effects: matchName is Pseudo/@@..., detect by property name "Menu"
                 var isDropdown = (mn === "ADBE Dropdown Control");
                 if (!isDropdown) {
                   try {
                     var firstProp = effect.property(1);
                     if (firstProp && firstProp.name === "Menu") isDropdown = true;
                   } catch(edp) {}
+                }
+                // Also detect by Pseudo matchName + numeric value (dropdown value is integer)
+                if (!isDropdown && mn.indexOf("Pseudo/") === 0 && typeof eProp.value === "number") {
+                  var numVal = eProp.value;
+                  if (numVal === Math.floor(numVal) && numVal >= 1 && numVal <= 100) {
+                    isDropdown = true;
+                  }
                 }
                 // Also check effect name as fallback
                 if (!isDropdown && effect.name.indexOf("Dropdown") >= 0) {
@@ -93,6 +126,7 @@ function getEssentialGraphicsParameters() {
                 if (isDropdown) {
                   eInfo.fieldType = "dropdown";
                   eInfo.choices = [];
+                  // Try standard API first
                   try {
                     var menuProp2 = effect.property(1);
                     if (typeof menuProp2.getPropertyParameters === "function") {
@@ -105,6 +139,13 @@ function getEssentialGraphicsParameters() {
                     }
                   } catch(edc) {
                     debugLog.push("Dropdown choices err: " + edc.message);
+                  }
+                  // Fallback: scan layer expressions for Layer Switcher choices
+                  if (eInfo.choices.length === 0) {
+                    eInfo.choices = _getChoicesFromExpressions(comp, layer.name, debugLog);
+                    if (eInfo.choices.length > 0) {
+                      debugLog.push("  choices found: " + eInfo.choices.join(", "));
+                    }
                   }
                 }
                 results.push(eInfo);
@@ -128,9 +169,54 @@ function getEssentialGraphicsParameters() {
         debugLog.push("M2 L" + i + " err: " + ex2.toString());
       }
     }
+
+    // Cross-reference Method 2 results with EG names
+    if (egTopNames.length > 0 && results.length > 0) {
+      debugLog.push("M2 xref: " + results.length + " results vs " + egTopNames.length + " EG names");
+
+      // Build set of names already correctly assigned
+      var usedNames = {};
+      for (var ui = 0; ui < results.length; ui++) {
+        if (!_isGenericControlName(results[ui].parameterName)) {
+          usedNames[results[ui].parameterName] = true;
+        }
+      }
+
+      // Collect EG names not yet used by any result
+      var availableNames = [];
+      for (var ai = 0; ai < egTopNames.length; ai++) {
+        if (!usedNames[egTopNames[ai]]) {
+          availableNames.push(egTopNames[ai]);
+        }
+      }
+
+      debugLog.push("M2 available EG names: " + availableNames.join(", "));
+
+      // Build lookup of all EG names for quick check
+      var egNameSet = {};
+      for (var eni = 0; eni < egTopNames.length; eni++) {
+        egNameSet[egTopNames[eni]] = true;
+      }
+
+      // Apply available EG names to results that need renaming:
+      // - Generic control names (e.g. "Dropdown Menu Control")
+      // - Names not found in EG (e.g. text layers using layer.name instead of EG name)
+      var nameIdx = 0;
+      for (var ri = 0; ri < results.length && nameIdx < availableNames.length; ri++) {
+        var needsRename = _isGenericControlName(results[ri].parameterName) ||
+                          !egNameSet[results[ri].parameterName];
+        if (needsRename) {
+          debugLog.push("M2 rename: " + results[ri].parameterName + " -> " + availableNames[nameIdx]);
+          results[ri].parameterName = availableNames[nameIdx];
+          results[ri].label = availableNames[nameIdx];
+          nameIdx++;
+        }
+      }
+    }
   }
 
   // Method 3: ADBE Layer Overrides (Essential Properties on nested comps)
+  // (only if previous methods produced nothing)
   if (results.length === 0) {
     debugLog.push("M3: scanning ADBE Layer Overrides");
     for (var i3 = 1; i3 <= comp.numLayers; i3++) {
@@ -159,8 +245,155 @@ function getEssentialGraphicsParameters() {
   return JSON.stringify({ params: results, debug: debugLog.join(" | ") });
 }
 
+// Check if a property name is a generic AE control name (not user-assigned)
+function _isGenericControlName(name) {
+  var generics = [
+    "Dropdown Menu Control", "Menu",
+    "Slider Control", "Slider",
+    "Color Control", "Color",
+    "Point Control", "Point",
+    "Checkbox Control", "Checkbox",
+    "Layer Control", "Layer",
+    "Angle Control", "Angle",
+    "Source Text"
+  ];
+  for (var i = 0; i < generics.length; i++) {
+    if (name === generics[i]) return true;
+  }
+  return false;
+}
+
+// Get dropdown choices by scanning layer opacity expressions
+// Layer Switcher creates expressions like: sel == N ? 100 : 0
+// where the layer name is the dropdown choice label
+// Also scans pre-compositions for nested switchers
+function _getChoicesFromExpressions(comp, ctrlLayerName, debugLog) {
+  var indexed = [];
+  var maxIdx = 0;
+  var scanned = 0;
+  var withExpr = 0;
+
+  // Scan current comp and any pre-comps
+  var compsToScan = [comp];
+  for (var c = 1; c <= comp.numLayers; c++) {
+    try {
+      var src = comp.layer(c).source;
+      if (src && src instanceof CompItem) compsToScan.push(src);
+    } catch(e) {}
+  }
+
+  for (var ci = 0; ci < compsToScan.length; ci++) {
+    var scanComp = compsToScan[ci];
+    for (var i = 1; i <= scanComp.numLayers; i++) {
+      try {
+        var lyr = scanComp.layer(i);
+        scanned++;
+        var opacity = lyr.property("ADBE Transform Group").property("ADBE Opacity");
+        if (!opacity) continue;
+        var exprStr = "";
+        try { exprStr = opacity.expression || ""; } catch(e2) { continue; }
+        if (!exprStr) continue;
+        withExpr++;
+        // Check if this expression references our controller layer
+        if (exprStr.indexOf(ctrlLayerName) < 0) continue;
+        // Extract number from "== N" pattern (handles both "sel == N" and "value == N")
+        var eqPos = exprStr.indexOf("== ");
+        if (eqPos < 0) eqPos = exprStr.indexOf("==");
+        if (eqPos < 0) continue;
+        var numStr = "";
+        var sp = eqPos + 2;
+        while (sp < exprStr.length && exprStr.charAt(sp) === " ") sp++;
+        while (sp < exprStr.length && "0123456789".indexOf(exprStr.charAt(sp)) >= 0) {
+          numStr += exprStr.charAt(sp);
+          sp++;
+        }
+        if (numStr) {
+          var idx = parseInt(numStr, 10);
+          if (idx > 0) {
+            indexed[idx - 1] = lyr.name;
+            if (idx > maxIdx) maxIdx = idx;
+          }
+        }
+      } catch(e) {}
+    }
+  }
+
+  if (debugLog) {
+    debugLog.push("  exprScan(\"" + ctrlLayerName + "\"): layers=" + scanned + " withExpr=" + withExpr + " matched=" + maxIdx);
+    // If expressions exist but none matched, dump one sample for debugging
+    if (withExpr > 0 && maxIdx === 0) {
+      for (var si = 0; si < compsToScan.length; si++) {
+        var sc = compsToScan[si];
+        for (var sj = 1; sj <= sc.numLayers; sj++) {
+          try {
+            var sl = sc.layer(sj);
+            var sop = sl.property("ADBE Transform Group").property("ADBE Opacity");
+            if (sop && sop.expression) {
+              debugLog.push("  exprSample: " + sop.expression.replace(/[\r\n]+/g, " ").substring(0, 150));
+              si = compsToScan.length; // break outer
+              break;
+            }
+          } catch(e3) {}
+        }
+      }
+    }
+  }
+
+  var result = [];
+  for (var j = 0; j < maxIdx; j++) {
+    result.push(indexed[j] || ("Option " + (j + 1)));
+  }
+  return result;
+}
+
+// Collect user-assigned names from Essential Graphics panel hierarchy
+// Groups with only leaf children are parameter wrappers (use group name)
+// Groups with sub-groups are organizational (recurse into them)
+function _collectEGLeafNames(group, names, depth) {
+  if (depth > 10) return;
+  try {
+    for (var i = 1; i <= group.numProperties; i++) {
+      var prop = group.property(i);
+      if (!prop) continue;
+      var pType = -1;
+      try { pType = prop.propertyType; } catch(e) {}
+      var propName = "";
+      try { propName = prop.name || ""; } catch(e) {}
+
+      if (pType === 1 || pType === 2) {
+        // Group - check if it has sub-groups (organizational) or only leaves (wrapper)
+        var hasGroupChildren = false;
+        try {
+          for (var j = 1; j <= prop.numProperties; j++) {
+            var child = prop.property(j);
+            if (!child) continue;
+            var childType = -1;
+            try { childType = child.propertyType; } catch(e) {}
+            if (childType === 1 || childType === 2) { hasGroupChildren = true; break; }
+          }
+        } catch(e) {}
+
+        if (!hasGroupChildren && !_isGenericControlName(propName)) {
+          // Wrapper group with only leaf children → user-assigned name
+          names.push(propName);
+        } else if (hasGroupChildren) {
+          // Organizational group (layer grouping) → recurse
+          _collectEGLeafNames(prop, names, depth + 1);
+        }
+        // If generic name with only leaves → skip (no user name available)
+      } else {
+        // Leaf property with non-generic name
+        if (!_isGenericControlName(propName)) {
+          names.push(propName);
+        }
+      }
+    }
+  } catch(e) {}
+}
+
 // Recursively scan an EG property group (handles nested layer groups)
-function _scanEGGroupRecursive(group, results, debugLog, depth) {
+// parentGroupName: the name of the parent group, used when a leaf has a generic name
+function _scanEGGroupRecursive(group, results, debugLog, depth, parentGroupName) {
   if (depth > 5) return;
   try {
     var np = group.numProperties;
@@ -171,14 +404,40 @@ function _scanEGGroupRecursive(group, results, debugLog, depth) {
       var pType = -1;
       try { pType = prop.propertyType; } catch(ept) {}
 
-      debugLog.push("d" + depth + "[" + i + "]=" + prop.name + " pt=" + pType);
+      debugLog.push("d" + depth + "[" + i + "]=" + prop.name + " pt=" + pType + " parent=" + (parentGroupName || ""));
 
       // PropertyType: PROPERTY=0, INDEXED_GROUP=1, NAMED_GROUP=2
       if (pType === 1 || pType === 2) {
-        _scanEGGroupRecursive(prop, results, debugLog, depth + 1);
+        // Propagate the best non-generic name down the hierarchy
+        var nameForChildren = _isGenericControlName(prop.name) ? parentGroupName : prop.name;
+        _scanEGGroupRecursive(prop, results, debugLog, depth + 1, nameForChildren);
       } else {
         var info = _analyzeEGParam(prop, null);
-        if (info) results.push(info);
+        if (info) {
+          // Use parent group name when property has a generic AE control name
+          if (parentGroupName && _isGenericControlName(info.parameterName)) {
+            info.parameterName = parentGroupName;
+            info.label = parentGroupName;
+          }
+
+          // Detect dropdown: try getPropertyParameters for choices
+          try {
+            if (typeof prop.getPropertyParameters === "function") {
+              var ddParams = prop.getPropertyParameters();
+              if (ddParams && ddParams.length > 0) {
+                info.fieldType = "dropdown";
+                info.choices = [];
+                for (var pi = 0; pi < ddParams.length; pi++) {
+                  info.choices.push(String(ddParams[pi]));
+                }
+              }
+            }
+          } catch(edc) {
+            debugLog.push("EG dropdown err: " + edc.message);
+          }
+
+          results.push(info);
+        }
       }
     }
   } catch(ex) {
