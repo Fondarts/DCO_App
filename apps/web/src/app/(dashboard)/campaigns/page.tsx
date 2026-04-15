@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import Link from "next/link";
+import { CreateCampaignButton } from "./create-campaign-button";
 
 export default async function CampaignsPage() {
   const session = await auth();
@@ -19,12 +20,13 @@ export default async function CampaignsPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-bold">Campaigns</h2>
+        <CreateCampaignButton />
       </div>
 
       {campaigns.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <p>No campaigns yet.</p>
-          <p className="text-sm mt-1">Use the seed API to create demo data.</p>
+          <p className="text-sm mt-1">Create your first campaign to get started.</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

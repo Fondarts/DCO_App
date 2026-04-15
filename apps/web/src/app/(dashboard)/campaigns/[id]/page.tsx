@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { RemoveTemplateButton } from "./remove-template-button";
 
 export default async function CampaignDetailPage({
   params,
@@ -46,15 +47,27 @@ export default async function CampaignDetailPage({
           {campaign.templates.map((ct) => (
             <div
               key={ct.id}
-              className="bg-gray-900 border border-gray-800 rounded px-4 py-3"
+              className="bg-gray-900 border border-gray-800 rounded px-4 py-3 group relative"
             >
-              <p className="font-medium">{ct.template.name}</p>
-              <Link
-                href={`/campaigns/${campaign.id}/variants/new?templateId=${ct.templateId}`}
-                className="text-sm text-blue-400 hover:text-blue-300 mt-1 inline-block"
-              >
-                + New Variant
-              </Link>
+              <RemoveTemplateButton
+                campaignId={campaign.id}
+                templateId={ct.templateId}
+              />
+              <p className="font-medium pr-6">{ct.template.name}</p>
+              <div className="flex gap-3 mt-1">
+                <Link
+                  href={`/campaigns/${campaign.id}/variants/new?templateId=${ct.templateId}`}
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                >
+                  + New Variant
+                </Link>
+                <Link
+                  href={`/campaigns/${campaign.id}/batch?templateId=${ct.templateId}`}
+                  className="text-sm text-purple-400 hover:text-purple-300"
+                >
+                  Bulk Edit
+                </Link>
+              </div>
             </div>
           ))}
         </div>

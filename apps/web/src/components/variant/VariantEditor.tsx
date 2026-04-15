@@ -774,8 +774,8 @@ function FieldInput({
     }
 
     case "dropdown": {
+      const choices = field.choices ?? field.validation?.options ?? [];
       const dropVal = (value as number) ?? (field.default as number) ?? 1;
-      const choices = field.choices ?? [];
       return (
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">{field.label}</label>
@@ -837,22 +837,7 @@ function FieldInput({
       );
     }
 
-    case "dropdown": {
-      const options = field.validation?.options ?? [];
-      const selVal = (value as string) ?? (field.default as string) ?? "";
-      return (
-        <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">{field.label}</label>
-          <select
-            value={selVal}
-            onChange={(e) => onChange(e.target.value)}
-            className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {options.map((opt) => (<option key={opt} value={opt}>{opt}</option>))}
-          </select>
-        </div>
-      );
-    }
+    /* dropdown handled above */
 
     case "font": {
       const fontVal = (value as string) ?? (field.default as string) ?? "";

@@ -46,13 +46,28 @@
             }
 
             // Check effects (Expression Controls: Dropdown, Slider, Color, etc.)
+            // Match by: effect name, layer name, or derived name from "[CTRL] X" layer pattern
             try {
                 var effects = layer.property("ADBE Effect Parade");
                 if (effects && effects.numProperties > 0) {
+                    // Derive controller name from "[CTRL] X" layer naming convention
+                    var derivedName = "";
+                    if (layerName.indexOf("[CTRL] ") === 0) {
+                        derivedName = layerName.substring(7);
+                    }
+
                     for (var ef = 1; ef <= effects.numProperties; ef++) {
                         var effect = effects.property(ef);
                         var effectName = effect.name;
+
+                        // Try matching: effect name, derived layer name, or layer name
                         var paramValue = essentialParameters[effectName];
+                        if (typeof paramValue === "undefined" && derivedName) {
+                            paramValue = essentialParameters[derivedName];
+                        }
+                        if (typeof paramValue === "undefined") {
+                            paramValue = essentialParameters[layerName];
+                        }
 
                         if (typeof paramValue === "undefined") continue;
 
