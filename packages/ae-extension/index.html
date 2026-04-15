@@ -6,16 +6,10 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <h1>DCO</h1>
-  <div class="subtitle">Dynamic Creative Optimization</div>
-
-  <!-- Mode Toggle -->
-  <div class="section">
-    <div class="section-title">Template Type</div>
-    <div style="display:flex;gap:4px;">
-      <button class="btn btn-primary btn-small" id="mode-mogrt">MOGRT</button>
-      <button class="btn btn-small" id="mode-aep">AEP (Legacy)</button>
-    </div>
+  <!-- Hidden: Template Type (always MOGRT for now) -->
+  <div style="display:none;">
+    <button id="mode-mogrt">MOGRT</button>
+    <button id="mode-aep">AEP</button>
   </div>
 
   <!-- Composition Info -->
@@ -36,32 +30,31 @@
   <!-- MOGRT Controls -->
   <div id="mogrt-controls">
     <div class="section">
-      <div class="section-title">MOGRT File</div>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <button class="btn btn-secondary btn-small" id="btn-browse-mogrt">Select .mogrt</button>
-        <span id="mogrt-path-display" style="font-size:11px;color:#aaa;">No file selected</span>
-      </div>
-      <div style="font-size:10px;color:#666;margin-top:4px;">
-        Export from AE: File &gt; Export &gt; Motion Graphics Template
-      </div>
-    </div>
-
-    <div class="section">
       <div class="section-title">Essential Graphics Parameters</div>
       <button class="btn btn-primary btn-small" id="btn-scan-eg">Scan EG Parameters</button>
     </div>
   </div>
 
-  <!-- Tools -->
+  <!-- Submenu: Tools & Import -->
   <div class="section">
-    <div class="section-title">Tools</div>
-    <div style="display:flex;gap:6px;align-items:center;">
-      <button class="btn btn-secondary btn-small" id="btn-layer-switcher">Layer Switcher</button>
-      <span style="font-size:10px;color:#888;">Select 2+ layers, creates dropdown toggle</span>
+    <div class="section-title submenu-toggle" id="submenu-tools-toggle" style="cursor:pointer;">
+      Tools &amp; Import <span id="submenu-tools-arrow" style="float:right;">&#9662;</span>
+    </div>
+    <div id="submenu-tools" style="display:none;">
+      <div style="display:flex;flex-direction:column;gap:6px;padding-top:6px;">
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn btn-secondary btn-small" id="btn-layer-switcher">Layer Switcher</button>
+          <span style="font-size:10px;color:#888;">Select 2+ layers, creates dropdown toggle</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <button class="btn btn-secondary btn-small" id="btn-browse-mogrt">Import .mogrt</button>
+          <span id="mogrt-path-display" style="font-size:11px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;">No file selected</span>
+        </div>
+      </div>
     </div>
   </div>
 
-  <!-- AEP Controls -->
+  <!-- AEP Controls (hidden) -->
   <div id="aep-controls" style="display:none;">
     <div class="section" style="margin-top:0;">
       <div style="margin-top: 4px;">
@@ -106,11 +99,10 @@
     <div id="detected-comps" style="font-size:10px;color:#888;margin-top:4px;"></div>
   </div>
 
-  <!-- Thumbnail -->
-  <div class="section">
-    <div class="section-title">Thumbnail</div>
+  <!-- Thumbnail (auto-generated on send, hidden) -->
+  <div style="display:none;">
     <div id="thumbnail-preview"></div>
-    <button class="btn btn-secondary" id="btn-thumbnail">Generate Thumbnail</button>
+    <button id="btn-thumbnail">Generate Thumbnail</button>
   </div>
 
   <!-- Server & Send -->

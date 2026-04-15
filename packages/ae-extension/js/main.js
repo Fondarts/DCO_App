@@ -31,6 +31,19 @@ document.addEventListener("DOMContentLoaded", function() {
   document.getElementById("server-url").addEventListener("change", function() {
     serverUrl = this.value;
   });
+  // Submenu toggle
+  document.getElementById("submenu-tools-toggle").addEventListener("click", function() {
+    var panel = document.getElementById("submenu-tools");
+    var arrow = document.getElementById("submenu-tools-arrow");
+    if (panel.style.display === "none") {
+      panel.style.display = "block";
+      arrow.innerHTML = "&#9652;";
+    } else {
+      panel.style.display = "none";
+      arrow.innerHTML = "&#9662;";
+    }
+  });
+
   // Detect compositions for output variants
   document.getElementById("btn-detect-comps").addEventListener("click", function() {
     cs.evalScript("getProjectCompositions()", function(result) {
