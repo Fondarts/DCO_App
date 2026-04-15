@@ -53,21 +53,35 @@ try {
   console.log("[nexrender] Render complete. Output:", result.output);
   console.log("[nexrender] Template dest:", result.template?.dest);
 
-  // For MOGRT, nexrender may not set result.output correctly.
-  // The rendered file is result.mp4 in the workpath.
+  const { readdirSync } = await import("fs");
   let outputFile = result.output;
+
+  // Resolve PNG sequence pattern (result_[#####].png → result_00015.png)
+  if (outputFile && outputFile.includes("[#####]")) {
+    const dir = outputFile.substring(0, outputFile.lastIndexOf("/") === -1 ? outputFile.lastIndexOf("\\") : outputFile.lastIndexOf("/"));
+    const parentDir = dir || (result.workpath || jobData.workpath) + "/" + result.uid;
+    try {
+      const files = readdirSync(parentDir);
+      const pngFile = files.find(f => f.startsWith("result_") && f.endsWith(".png"));
+      if (pngFile) {
+        outputFile = parentDir + "/" + pngFile;
+        console.log("[nexrender] Resolved PNG pattern to:", outputFile);
+      }
+    } catch(e) {
+      console.log("[nexrender] Could not resolve PNG pattern:", e.message);
+    }
+  }
+
+  // If output still not found, search workdir
   if (!outputFile || !existsSync(outputFile)) {
-    // Try to find the output in the workdir
     const workdir = result.workpath || jobData.workpath;
     const uid = result.uid;
     if (workdir && uid) {
       const candidates = ["output.mp4", "result.mp4", "result.avi"];
-      const { readdirSync } = await import("fs");
       const dir = workdir + "/" + uid;
       try {
         const files = readdirSync(dir);
         console.log("[nexrender] Workdir files:", files.join(", "));
-        // Check exact candidates first
         for (const c of candidates) {
           const p = dir + "/" + c;
           if (existsSync(p)) {
@@ -76,9 +90,9 @@ try {
             break;
           }
         }
-        // If not found, look for PNG files (single-frame preview renders)
+        // Look for any PNG
         if (!outputFile || !existsSync(outputFile)) {
-          const pngFile = files.find(f => f.startsWith("result_") && f.endsWith(".png"));
+          const pngFile = files.find(f => f.endsWith(".png"));
           if (pngFile) {
             outputFile = dir + "/" + pngFile;
             console.log("[nexrender] Found PNG output at:", outputFile);
