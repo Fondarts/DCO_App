@@ -39,6 +39,7 @@ model Template {
   organizationId   String
   organization     Organization       @relation(fields: [organizationId], references: [id])
   templateFilePath String             @default("")
+  storageKey       String?            // Portable storage key (e.g. "orgs/{orgId}/templates/{id}/file.mogrt")
   templateFormat   String             @default("aep") // aep, mogrt
   thumbnailPath    String?
   manifest         String             // JSON stored as string (SQLite)

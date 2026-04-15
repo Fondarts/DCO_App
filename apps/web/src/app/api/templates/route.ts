@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getTemplateFilePath } from "@/lib/storage";
+import { getTemplateFilePath, StorageKeys } from "@/lib/storage";
 import { writeFile, copyFile } from "fs/promises";
 import { existsSync } from "fs";
 import { parseMogrtFile } from "@/lib/mogrt-parser";
@@ -213,11 +213,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Store storage key (relative path) — portable across machines
+  const storageKey = StorageKeys.template(orgId, template.id, fileName);
+
   // Update with file paths and manifest
   const updated = await prisma.template.update({
     where: { id: template.id },
     data: {
-      templateFilePath: filePath,
+      templateFilePath: filePath,       // absolute local path (legacy, for local rendering)
+      storageKey,                       // relative key (portable, for remote workers)
       thumbnailPath,
       manifest: JSON.stringify(manifest),
     },

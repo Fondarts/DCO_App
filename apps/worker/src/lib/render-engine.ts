@@ -11,12 +11,13 @@ import { existsSync, mkdirSync, readdirSync } from "fs";
 import { writeFile, readFile, rm, copyFile } from "fs/promises";
 import path from "path";
 import { randomUUID } from "crypto";
-import type { TemplateManifest } from "@dco/shared";
+import type { TemplateManifest, StorageProvider } from "@dco/shared";
+import { getStorageProvider } from "@dco/shared";
 
 const execFileAsync = promisify(execFile);
 
 export interface RenderEngineConfig {
-  /** Root directory where template files are stored */
+  /** Root directory where template files are stored (local mode) */
   storageRoot: string;
   /** Temp working directory for nexrender */
   workdir: string;
@@ -24,6 +25,8 @@ export interface RenderEngineConfig {
   aerenderPath?: string;
   /** Path to ffmpeg.exe (optional, auto-detected if not set) */
   ffmpegPath?: string;
+  /** Storage provider for downloading templates (optional, uses local by default) */
+  storage?: StorageProvider;
 }
 
 export interface RenderRequest {
@@ -182,6 +185,7 @@ export class RenderEngine {
   private ffmpegPath: string;
   private mogrtActionPath: string;
   private mogrtJsxPath: string;
+  private storage: StorageProvider;
 
   constructor(config?: Partial<RenderEngineConfig>) {
     this.config = {
@@ -190,6 +194,7 @@ export class RenderEngine {
       aerenderPath: config?.aerenderPath,
       ffmpegPath: config?.ffmpegPath,
     };
+    this.storage = config?.storage || getStorageProvider();
 
     this.aerenderPath = this.config.aerenderPath || findBinary("AERENDER_PATH", DEFAULT_AERENDER_PATHS);
     this.ffmpegPath = this.config.ffmpegPath || findBinary("FFMPEG_PATH", DEFAULT_FFMPEG_PATHS);
@@ -208,22 +213,19 @@ export class RenderEngine {
     const { manifest, fieldValues, jobId } = request;
     const isMogrt = manifest.format === "mogrt";
 
-    // Resolve template file path
-    let templatePath = request.templateFilePath;
-    if (!path.isAbsolute(templatePath)) {
-      templatePath = path.resolve(this.config.storageRoot, "..", templatePath);
-    }
+    // Resolve template file to a local path
+    // Supports: absolute paths, storage keys, and relative paths
+    let templatePath = await this.resolveFile(request.templateFilePath);
 
     // Check for variant-specific MOGRT
     if (isMogrt && request.outputVariantId) {
       const variant = manifest.outputVariants.find((v) => v.id === request.outputVariantId);
       const variantMogrt = (variant as Record<string, unknown> | undefined)?.mogrtPath as string | undefined;
       if (variantMogrt) {
-        const absVariantMogrt = path.isAbsolute(variantMogrt)
-          ? variantMogrt
-          : path.resolve(this.config.storageRoot, "..", variantMogrt);
-        if (existsSync(absVariantMogrt)) {
-          templatePath = absVariantMogrt;
+        try {
+          templatePath = await this.resolveFile(variantMogrt);
+        } catch {
+          // Variant MOGRT not found, use main template
         }
       }
     }
@@ -342,6 +344,51 @@ export class RenderEngine {
     await rm(tempVideo, { force: true }).catch(() => {});
 
     return previewOutputPath;
+  }
+
+  /**
+   * Resolve a file path or storage key to a local path.
+   * If it's a storage key (not an absolute path), download from storage to temp.
+   */
+  private async resolveFile(filePathOrKey: string): Promise<string> {
+    // Already an absolute local path
+    if (path.isAbsolute(filePathOrKey) && existsSync(filePathOrKey)) {
+      return filePathOrKey;
+    }
+
+    // Try resolving relative to storage root (local provider)
+    const localResolved = path.resolve(this.config.storageRoot, filePathOrKey);
+    if (existsSync(localResolved)) {
+      return localResolved;
+    }
+
+    // Try as a storage key — download from provider
+    if (await this.storage.exists(filePathOrKey)) {
+      const data = await this.storage.download(filePathOrKey);
+      const tempDir = path.resolve(this.config.workdir, "downloads");
+      mkdirSync(tempDir, { recursive: true });
+      const filename = filePathOrKey.split("/").pop() || "template";
+      const localPath = path.join(tempDir, `${randomUUID()}-${filename}`);
+      await writeFile(localPath, data);
+      return localPath;
+    }
+
+    // Try the legacy path resolution (relative to parent of storage root)
+    const legacyResolved = path.resolve(this.config.storageRoot, "..", filePathOrKey);
+    if (existsSync(legacyResolved)) {
+      return legacyResolved;
+    }
+
+    throw new Error(`File not found: ${filePathOrKey}`);
+  }
+
+  /**
+   * Upload the rendered output to storage and return the storage key.
+   */
+  async uploadResult(localPath: string, storageKey: string): Promise<string> {
+    const data = await readFile(localPath);
+    await this.storage.upload(storageKey, data, "video/mp4");
+    return storageKey;
   }
 
   private async runNexrender(
