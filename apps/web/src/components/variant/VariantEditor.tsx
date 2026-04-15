@@ -79,11 +79,18 @@ export function VariantEditor({
     }
   }, [mode, variantId]);
 
-  // Determine preview aspect ratio
+  // Determine preview aspect ratio and thumbnail
   const selectedVariant = manifest.outputVariants.find((v) => v.id === outputVariantId);
   const previewWidth = selectedVariant?.width || manifest.width;
   const previewHeight = selectedVariant?.height || manifest.height;
   const aspectRatio = `${previewWidth} / ${previewHeight}`;
+
+  // Get thumbnail for current output variant (stored as base64 in manifest)
+  const variantThumb = (selectedVariant as Record<string, unknown> | undefined)?.thumbnailBase64 as string | undefined;
+  const mainThumb = (manifest as unknown as Record<string, unknown>).thumbnailBase64 as string | undefined;
+  const thumbnailSrc = variantThumb || mainThumb
+    ? `data:image/png;base64,${variantThumb || mainThumb}`
+    : null;
 
   function updateField(fieldId: string, value: unknown) {
     setFieldValues((prev) => ({ ...prev, [fieldId]: value }));
@@ -365,9 +372,19 @@ export function VariantEditor({
               className="rounded overflow-hidden relative bg-gray-900"
               style={{ aspectRatio, maxHeight: "500px" }}
             >
-              {/* Layer 1: HTML Canvas (always rendered) */}
+              {/* Layer 0: Thumbnail from template (shows immediately) */}
+              {thumbnailSrc && (
+                <div className={`absolute inset-0 z-5 transition-opacity duration-500 ${
+                  previewSource === "ae-ready" ? "opacity-0" : "opacity-100"
+                }`}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={thumbnailSrc} alt="Template thumbnail" className="w-full h-full object-contain" />
+                </div>
+              )}
+
+              {/* Layer 1: HTML Canvas (hidden when thumbnail is available) */}
               <div className={`absolute inset-0 z-10 transition-opacity duration-500 ${
-                previewSource === "ae-ready" ? "opacity-0" : "opacity-100"
+                previewSource === "ae-ready" || thumbnailSrc ? "opacity-0" : "opacity-100"
               }`}>
                 <HtmlPreviewCanvas
                   fields={manifest.fields}

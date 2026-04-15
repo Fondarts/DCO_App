@@ -954,6 +954,55 @@ function getAllLayers() {
   return JSON.stringify(layers);
 }
 
+// Save thumbnail for a specific comp by name (or active comp if no name given)
+function saveFrameForComp(compName, outputPath) {
+  var comp = null;
+  if (compName) {
+    for (var ci = 1; ci <= app.project.numItems; ci++) {
+      var item = app.project.item(ci);
+      if (item instanceof CompItem && item.name === compName) {
+        comp = item;
+        break;
+      }
+    }
+  }
+  if (!comp) {
+    return JSON.stringify({ error: "Comp not found: " + compName });
+  }
+
+  var outFile = new File(outputPath);
+  var folder = outFile.parent;
+  if (!folder.exists) folder.create();
+
+  try {
+    comp.saveFrameToPng(comp.time, outFile);
+    if (outFile.exists) return JSON.stringify({ success: true, path: outFile.fsName });
+  } catch(e) {}
+
+  // Fallback: render queue
+  try {
+    while (app.project.renderQueue.numItems > 0) {
+      app.project.renderQueue.item(app.project.renderQueue.numItems).remove();
+    }
+    var rqItem = app.project.renderQueue.items.add(comp);
+    rqItem.timeSpanStart = comp.time;
+    rqItem.timeSpanDuration = comp.frameDuration;
+    var om = rqItem.outputModule(1);
+    om.file = outFile;
+    try { om.applyTemplate("PNG Sequence"); } catch(e2) {}
+    app.project.renderQueue.render();
+    while (app.project.renderQueue.numItems > 0) {
+      app.project.renderQueue.item(app.project.renderQueue.numItems).remove();
+    }
+    if (outFile.exists) return JSON.stringify({ success: true, path: outFile.fsName });
+    var baseName = outFile.name.replace(/\.[^.]+$/, "");
+    var files = folder.getFiles(baseName + "*");
+    if (files && files.length > 0) return JSON.stringify({ success: true, path: files[0].fsName });
+  } catch(e3) {}
+
+  return JSON.stringify({ error: "Thumbnail failed for " + compName });
+}
+
 function saveFrameAsThumbnail(outputPath) {
   var comp = app.project.activeItem;
   if (!comp || !(comp instanceof CompItem)) {

@@ -416,24 +416,94 @@ function sendToDCO() {
       mogrtPath = exportData.path;
       document.getElementById("mogrt-path-display").textContent = mogrtPath.split(/[/\\]/).pop();
 
-      // Export variant MOGRTs for each output variant with a composition
+      // Export variant MOGRTs, then generate thumbnails for all comps
       _exportVariantMogrts(function() {
-        setStatus("All MOGRTs exported, uploading...");
+        _generateAllThumbnails(function() {
+          setStatus("All MOGRTs & thumbnails ready, uploading...");
+          _doSendToDCO();
+        });
+      });
+    });
+    return;
+  }
+
+  // If MOGRT already selected, still export variants + thumbnails
+  if (templateMode === "mogrt") {
+    _exportVariantMogrts(function() {
+      _generateAllThumbnails(function() {
         _doSendToDCO();
       });
     });
     return;
   }
 
-  // If MOGRT already selected, still export variants
-  if (templateMode === "mogrt") {
-    _exportVariantMogrts(function() {
-      _doSendToDCO();
-    });
-    return;
+  _doSendToDCO();
+}
+
+// variantThumbnails: { "main": path, "landscape": path, "square": path, "vertical": path }
+var variantThumbnails = {};
+
+function _generateAllThumbnails(callback) {
+  variantThumbnails = {};
+
+  // Collect all comps that need thumbnails: main + variants
+  var compsToCapture = [];
+
+  // Main comp (active)
+  compsToCapture.push({ id: "main", comp: document.getElementById("template-name").value || "main" });
+
+  // Variant comps
+  if (document.getElementById("ov-landscape").checked) {
+    var lComp = document.getElementById("ov-landscape-comp").value.trim();
+    if (lComp) compsToCapture.push({ id: "landscape", comp: lComp });
+  }
+  if (document.getElementById("ov-square").checked) {
+    var sComp = document.getElementById("ov-square-comp").value.trim();
+    if (sComp) compsToCapture.push({ id: "square", comp: sComp });
+  }
+  if (document.getElementById("ov-vertical").checked) {
+    var vComp = document.getElementById("ov-vertical-comp").value.trim();
+    if (vComp) compsToCapture.push({ id: "vertical", comp: vComp });
   }
 
-  _doSendToDCO();
+  cs.evalScript("getProjectInfo()", function(projResult) {
+    var projInfo;
+    try { projInfo = JSON.parse(projResult); } catch(e) { callback(); return; }
+    if (projInfo.error) { callback(); return; }
+
+    var projDir = projInfo.path.replace(/\\/g, "/").replace(/\/[^/]+$/, "");
+    var idx = 0;
+
+    function captureNext() {
+      if (idx >= compsToCapture.length) {
+        callback();
+        return;
+      }
+      var item = compsToCapture[idx];
+      var thumbPath = projDir + "/dco_thumb_" + item.id + ".png";
+      setStatus("Capturing thumbnail: " + item.comp + "...");
+
+      // For main, use active comp; for variants, use saveFrameForComp
+      var script;
+      if (item.id === "main") {
+        script = 'saveFrameAsThumbnail("' + thumbPath.replace(/"/g, '\\"') + '")';
+      } else {
+        script = 'saveFrameForComp("' + item.comp.replace(/"/g, '\\"') + '","' + thumbPath.replace(/"/g, '\\"') + '")';
+      }
+
+      cs.evalScript(script, function(result) {
+        try {
+          var data = JSON.parse(result);
+          if (data.success && data.path) {
+            variantThumbnails[item.id] = data.path;
+          }
+        } catch(e) {}
+        idx++;
+        captureNext();
+      });
+    }
+    captureNext();
+  });
 }
 
 // variantMogrtPaths: { variantId: localPath }
@@ -631,22 +701,36 @@ function uploadMogrtToDCO(templateName, manifest) {
 
   // Send variant MOGRT paths
   var variantKeys = Object.keys(variantMogrtPaths);
-  document.getElementById("debug-output").textContent += "\nVariant MOGRTs to upload: " + JSON.stringify(variantMogrtPaths);
   if (variantKeys.length > 0) {
     formData.append("variantMogrtPaths", JSON.stringify(variantMogrtPaths));
   }
 
-  if (thumbnailPath) {
-    readFileAsBlob(thumbnailPath, function(terr, thumbBuffer) {
-      if (!terr && thumbBuffer) {
-        formData.append("thumbnail", new Blob([thumbBuffer], { type: "image/png" }), "thumbnail.png");
-      }
-      doUpload(formData);
-    });
-    return;
+  // Send variant thumbnails
+  if (Object.keys(variantThumbnails).length > 0) {
+    formData.append("variantThumbnails", JSON.stringify(variantThumbnails));
   }
 
-  doUpload(formData);
+  // Read and attach all thumbnail files as blobs
+  var thumbIds = Object.keys(variantThumbnails);
+  var thumbIdx = 0;
+
+  function attachNextThumb() {
+    if (thumbIdx >= thumbIds.length) {
+      doUpload(formData);
+      return;
+    }
+    var tid = thumbIds[thumbIdx];
+    var tpath = variantThumbnails[tid];
+    readFileAsBlob(tpath, function(terr, tbuf) {
+      if (!terr && tbuf) {
+        formData.append("thumb_" + tid, new Blob([tbuf], { type: "image/png" }), "thumb_" + tid + ".png");
+      }
+      thumbIdx++;
+      attachNextThumb();
+    });
+  }
+
+  attachNextThumb();
 }
 
 // --- AEP Upload ---

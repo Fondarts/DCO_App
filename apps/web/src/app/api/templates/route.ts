@@ -213,6 +213,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Process variant thumbnails (store as base64 in manifest for Vercel compatibility)
+  const thumbIds = ["main", "landscape", "square", "vertical"];
+  for (const tid of thumbIds) {
+    const thumbFile = formData.get(`thumb_${tid}`) as File | null;
+    if (!thumbFile) continue;
+    const thumbBuffer = Buffer.from(await thumbFile.arrayBuffer());
+    const base64 = thumbBuffer.toString("base64");
+
+    if (tid === "main") {
+      (manifest as unknown as Record<string, unknown>).thumbnailBase64 = base64;
+    } else {
+      const ov = manifest.outputVariants.find((v) => v.id === tid);
+      if (ov) {
+        (ov as unknown as Record<string, unknown>).thumbnailBase64 = base64;
+      }
+    }
+  }
+
   // Store storage key (relative path) — portable across machines
   const storageKey = StorageKeys.template(orgId, template.id, fileName);
 
@@ -220,8 +238,8 @@ export async function POST(req: NextRequest) {
   const updated = await prisma.template.update({
     where: { id: template.id },
     data: {
-      templateFilePath: filePath,       // absolute local path (legacy, for local rendering)
-      storageKey,                       // relative key (portable, for remote workers)
+      templateFilePath: filePath,
+      storageKey,
       thumbnailPath,
       manifest: JSON.stringify(manifest),
     },
