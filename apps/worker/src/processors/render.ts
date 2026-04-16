@@ -70,18 +70,23 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
 
     if (isPreview) {
       // Preview: render + extract frame
-      const previewLocalPath = path.join(
-        process.env.WORKER_WORKDIR || "./storage/tmp",
-        `preview-${payload.variantId}.png`
-      );
+      // Save preview OUTSIDE nexrender workdir so cleanup doesn't delete it
+      const storageRoot = process.env.STORAGE_ROOT || "./storage";
+      const previewDir = path.join(storageRoot, "previews");
+      const { mkdirSync } = await import("fs");
+      mkdirSync(previewDir, { recursive: true });
+      const previewLocalPath = path.join(previewDir, `preview-${payload.variantId}.png`);
+
       outputPath = await engine.renderPreview(renderRequest, previewLocalPath, progressCallback);
 
-      // Upload preview PNG to web server via API
+      // Upload preview PNG to web server via API (stores in DB for Vercel access)
       try {
         const { readFile } = await import("fs/promises");
+        console.log("[Worker] Uploading preview from:", outputPath);
         const pngData = await readFile(outputPath);
+        console.log("[Worker] Preview size:", pngData.length, "bytes");
         const base64 = pngData.toString("base64");
-        await fetch(`${API_URL}/api/worker/preview/${payload.variantId}`, {
+        const uploadRes = await fetch(`${API_URL}/api/worker/preview/${payload.variantId}`, {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -89,8 +94,9 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
           },
           body: JSON.stringify({ imageBase64: base64 }),
         });
+        console.log("[Worker] Preview upload:", uploadRes.status, uploadRes.ok ? "OK" : await uploadRes.text());
       } catch (uploadErr) {
-        console.warn("[Worker] Preview upload failed:", uploadErr);
+        console.error("[Worker] Preview upload failed:", uploadErr);
       }
     } else {
       // Full render
@@ -106,6 +112,7 @@ export async function processRenderJob(job: Job<RenderJobPayload>) {
     await job.updateProgress(100);
     await updateJobStatus(payload.jobId, "COMPLETED", {
       outputPath,
+      progress: 100,
       completedAt: new Date().toISOString(),
     });
 

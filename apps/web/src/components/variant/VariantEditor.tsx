@@ -372,10 +372,10 @@ export function VariantEditor({
               className="rounded overflow-hidden relative bg-gray-900"
               style={{ aspectRatio, maxHeight: "500px" }}
             >
-              {/* Layer 0: Thumbnail from template (shows immediately) */}
+              {/* Layer 0: Thumbnail from template (shows immediately, hides when AE preview exists) */}
               {thumbnailSrc && (
                 <div className={`absolute inset-0 z-5 transition-opacity duration-500 ${
-                  previewSource === "ae-ready" ? "opacity-0" : "opacity-100"
+                  previewSource === "ae-ready" || (previewSource === "ae-rendering" && aePreviewUrl) ? "opacity-0" : "opacity-100"
                 }`}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={thumbnailSrc} alt="Template thumbnail" className="w-full h-full object-contain" />
@@ -394,10 +394,11 @@ export function VariantEditor({
                 />
               </div>
 
-              {/* Layer 2: AE Render (crossfades in when ready) */}
+              {/* Layer 2: AE Render (stays visible while next preview renders) */}
               {aePreviewUrl && (
                 <div className={`absolute inset-0 z-20 transition-opacity duration-500 ${
-                  previewSource === "ae-ready" ? "opacity-100" : previewSource === "ae-stale" ? "opacity-30" : "opacity-0"
+                  previewSource === "ae-ready" || previewSource === "ae-rendering" || previewSource === "ae-stale"
+                    ? "opacity-100" : "opacity-0"
                 }`}>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={aePreviewUrl} alt="AE preview" className="w-full h-full object-contain" />

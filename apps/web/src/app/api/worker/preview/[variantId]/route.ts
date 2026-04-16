@@ -24,11 +24,26 @@ export async function PUT(
   const buffer = Buffer.from(imageBase64, "base64");
   previewCache.set(variantId, buffer);
 
-  // Also store in variant record for persistence
-  await prisma.variant.update({
-    where: { id: variantId },
-    data: { previewData: imageBase64 },
-  }).catch(() => {});
+  // Store in DB for cross-server access (Vercel reads from DB)
+  try {
+    await prisma.variant.update({
+      where: { id: variantId },
+      data: { previewData: imageBase64 },
+    });
+  } catch (dbErr) {
+    console.error("[preview] DB save failed:", dbErr);
+    // Retry once after a short delay (Neon cold start)
+    try {
+      await new Promise((r) => setTimeout(r, 1000));
+      await prisma.variant.update({
+        where: { id: variantId },
+        data: { previewData: imageBase64 },
+      });
+    } catch (retryErr) {
+      console.error("[preview] DB retry failed:", retryErr);
+      return NextResponse.json({ error: "DB save failed" }, { status: 500 });
+    }
+  }
 
   return NextResponse.json({ ok: true, size: buffer.length });
 }

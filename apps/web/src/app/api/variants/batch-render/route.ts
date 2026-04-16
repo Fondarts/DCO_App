@@ -1,9 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { getRenderQueue } from "@/lib/queue";
+import { getRenderQueue, isQueueAvailable } from "@/lib/queue";
+import { renderVideo } from "@/lib/aerender";
 import { parseManifest, parseFieldValues } from "@/lib/json";
 import type { RenderJobPayload } from "@dco/shared";
+
+async function runLocalRender(
+  renderJobId: string,
+  templateFilePath: string,
+  manifest: ReturnType<typeof parseManifest>,
+  fieldValues: Record<string, unknown>,
+  outputVariantId: string | undefined,
+  orgId: string
+) {
+  try {
+    await prisma.renderJob.update({
+      where: { id: renderJobId },
+      data: { status: "RENDERING", startedAt: new Date() },
+    });
+    const outputPath = await renderVideo(
+      { templateFilePath, manifest, fieldValues, outputVariantId, orgId },
+      renderJobId
+    );
+    await prisma.renderJob.update({
+      where: { id: renderJobId },
+      data: { status: "COMPLETED", outputPath, completedAt: new Date() },
+    });
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    console.error("[local-render] Failed:", msg);
+    await prisma.renderJob.update({
+      where: { id: renderJobId },
+      data: { status: "FAILED", errorMessage: msg },
+    }).catch(() => {});
+  }
+}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -21,7 +53,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Fetch all variants with their templates
   const variants = await prisma.variant.findMany({
     where: {
       id: { in: variantIds },
@@ -34,12 +65,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No variants found" }, { status: 404 });
   }
 
+  const queueOk = await isQueueAvailable();
   const results: Array<{ variantId: string; jobId: string; status: string }> = [];
   const errors: Array<{ variantId: string; message: string }> = [];
 
   for (const variant of variants) {
     try {
-      // Create render job record
       const renderJob = await prisma.renderJob.create({
         data: {
           variantId: variant.id,
@@ -48,32 +79,46 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      // Build job payload
       const manifest = parseManifest(variant.template.manifest);
+      const fieldValues = parseFieldValues(variant.fieldValues);
       const payload: RenderJobPayload = {
         jobId: renderJob.id,
         variantId: variant.id,
         templateId: variant.template.id,
         templateFilePath: variant.template.templateFilePath,
         manifest,
-        fieldValues: parseFieldValues(variant.fieldValues),
+        fieldValues,
         outputVariantId: variant.outputVariantId ?? undefined,
       };
 
-      // Try to add to queue
-      try {
-        await getRenderQueue().add("render-variant", payload, {
-          jobId: renderJob.id,
-        });
-        await prisma.renderJob.update({
-          where: { id: renderJob.id },
-          data: { status: "QUEUED" },
-        });
-        results.push({ variantId: variant.id, jobId: renderJob.id, status: "QUEUED" });
-      } catch {
-        // Redis not available - job stays as PENDING
-        results.push({ variantId: variant.id, jobId: renderJob.id, status: "PENDING" });
+      let queued = false;
+      if (queueOk) {
+        try {
+          await getRenderQueue().add("render-variant", payload, {
+            jobId: renderJob.id,
+          });
+          await prisma.renderJob.update({
+            where: { id: renderJob.id },
+            data: { status: "QUEUED" },
+          });
+          queued = true;
+        } catch {
+          // fall through to local
+        }
       }
+
+      if (!queued) {
+        runLocalRender(
+          renderJob.id,
+          variant.template.templateFilePath,
+          manifest,
+          fieldValues,
+          variant.outputVariantId ?? undefined,
+          session.user.organizationId
+        );
+      }
+
+      results.push({ variantId: variant.id, jobId: renderJob.id, status: queued ? "QUEUED" : "RENDERING" });
     } catch (err) {
       errors.push({ variantId: variant.id, message: (err as Error).message });
     }
